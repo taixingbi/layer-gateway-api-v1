@@ -14,7 +14,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
 
     async def dispatch(self, request: Request, call_next) -> Response:
         # Keep health checks unauthenticated for probes and uptime monitors.
-        if request.url.path == "/health":
+        if request.url.path in ("/health", "/ready", "/metrics"):
             return await call_next(request)
 
         # Require bearer token on all gateway business endpoints.

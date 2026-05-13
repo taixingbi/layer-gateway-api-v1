@@ -1,4 +1,5 @@
 import json
+import time
 from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException, Request
@@ -25,6 +26,19 @@ def _generate_session_id() -> str:
     return f"sess_{uuid4().hex[:12]}"
 
 
+def _resolve_session_id(request: Request) -> str:
+    """Resolve session from ``X-Session-Id`` header or mint a gateway-owned id (never from JSON body)."""
+    header_raw = (request.headers.get("x-session-id") or "").strip()
+    if header_raw:
+        if len(header_raw) < 3 or len(header_raw) > 128:
+            raise HTTPException(
+                status_code=400,
+                detail="X-Session-Id must be between 3 and 128 characters",
+            )
+        return header_raw
+    return _generate_session_id()
+
+
 def _normalize_request(payload: ChatRequest, request: Request) -> ChatRequest:
     """Normalize and validate chat input before downstream orchestration."""
     message = payload.message.strip()
@@ -47,8 +61,8 @@ def _build_orchestrator_request(payload: ChatRequest, request: Request) -> Orche
     # Correlation IDs are minted/propagated by request-context middleware.
     request_id = request.state.request_id
     trace_id = request.state.trace_id
-    # Session continuity is client-provided when valid, otherwise gateway-owned.
-    session_id = payload.session_id or _generate_session_id()
+    # Session continuity: header ``X-Session-Id`` first, then body, then gateway-owned.
+    session_id = _resolve_session_id(request)
     request.state.session_id = session_id
     return OrchestratorChatRequest(
         auth=AuthContext(**auth_context),
@@ -88,6 +102,7 @@ def _build_call_context(
 
 @router.post("/chat", response_model=ChatResponse)
 async def chat(request: Request, payload: ChatRequest):
+    request.state.access_log_stream = False
     # Record ingress event with correlation fields before processing.
     log_event("request_received", path="/api/chat", request_id=request.state.request_id, trace_id=request.state.trace_id)
     payload = _normalize_request(payload, request)
@@ -100,6 +115,7 @@ async def chat(request: Request, payload: ChatRequest):
     client = request.app.state.orchestrator_client
 
     if wants_stream:
+        request.state.access_log_stream = True
         # Return gateway-managed SSE stream contract.
         return StreamingResponse(
             _stream_response(request, orchestrator_payload),
@@ -144,9 +160,14 @@ async def _stream_response(request: Request, orchestrator_payload: OrchestratorC
     yield f"event: meta\ndata: {json.dumps(meta)}\n\n"
     client = request.app.state.orchestrator_client
     ctx = _build_call_context(request, orchestrator_payload, stream=True)
+    upstream_first = True
+    ttfb_start = time.perf_counter()
     try:
         # Forward normalized token events from orchestrator stream.
         async for token_event in client.stream_chat(orchestrator_payload, ctx):
+            if upstream_first:
+                request.state.stream_ttfb_ms = (time.perf_counter() - ttfb_start) * 1000
+                upstream_first = False
             yield token_event
         # Mark stream completion with terminal success event.
         yield "event: done\ndata: {\"status\":\"success\"}\n\n"

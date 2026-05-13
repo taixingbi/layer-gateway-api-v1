@@ -8,7 +8,10 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     app_name: str = "layer-gateway-api-v1"
+    service_name: str = "gateway-api"
     env: str = "dev"
+
+    max_inflight_requests: int = 100
 
     orchestrator_base_url: str = "http://192.168.86.179:30184"
     orchestrator_chat_path: str = "/v1/orchestrator/chat"
@@ -16,6 +19,9 @@ class Settings(BaseSettings):
     orchestrator_contract: Literal["gateway_json", "flat_headers"] = "gateway_json"
     orchestrator_timeout_ms: int = 15000
     orchestrator_retry_max_attempts: int = 2
+    orchestrator_readiness_path: str = "/health"
+    orchestrator_readiness_timeout_ms: int = 3000
+    orchestrator_readiness_probe_enabled: bool = True
 
     auth_mode: str = "stub"
     auth_stub_user_id: str = "user_001"
@@ -24,6 +30,10 @@ class Settings(BaseSettings):
     auth_stub_groups: str = ""
     auth_stub_teams: str = ""
     chat_message_max_length: int = 4000
+
+    # Timeout hierarchy (document / future wiring): outer > inner. Only ``orchestrator_timeout_ms`` drives httpx today.
+    client_timeout_ms: int = 65000
+    gateway_timeout_ms: int = 60000
 
 
 @lru_cache(maxsize=1)

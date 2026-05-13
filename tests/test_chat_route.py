@@ -43,6 +43,43 @@ def test_chat_returns_stable_response_contract():
         assert "error" in data and data["error"] is None
 
 
+def test_chat_uses_x_session_id_header_when_present():
+    app = create_app()
+    with TestClient(app) as client:
+        app.state.orchestrator_client = StubOrchestratorClient()
+        response = client.post(
+            "/api/chat",
+            headers={**_auth_headers(), "X-Session-Id": "ses-from-header-99"},
+            json={"message": "What is the return policy?", "metadata": {"page": "/support"}},
+        )
+        assert response.status_code == 200
+        assert response.json()["session_id"] == "ses-from-header-99"
+
+
+def test_chat_rejects_session_id_in_json_body():
+    app = create_app()
+    with TestClient(app) as client:
+        app.state.orchestrator_client = StubOrchestratorClient()
+        response = client.post(
+            "/api/chat",
+            headers=_auth_headers(),
+            json={"session_id": "sess-from-body", "message": "Hi", "metadata": {}},
+        )
+    assert response.status_code == 422
+
+
+def test_chat_rejects_short_x_session_id():
+    app = create_app()
+    with TestClient(app) as client:
+        app.state.orchestrator_client = StubOrchestratorClient()
+        response = client.post(
+            "/api/chat",
+            headers={**_auth_headers(), "X-Session-Id": "ab"},
+            json={"message": "Hi", "metadata": {}},
+        )
+        assert response.status_code == 400
+
+
 def test_chat_requires_auth():
     app = create_app()
     with TestClient(app) as client:

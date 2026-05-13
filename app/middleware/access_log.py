@@ -1,0 +1,107 @@
+"""Structured access logging and Prometheus observation for every request."""
+
+import time
+from datetime import datetime, timezone
+
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request
+from starlette.responses import Response, StreamingResponse
+
+from app.core.config import get_settings
+from app.core.logging import log_event
+from app.core.metrics import LATENCY_MS, REQUESTS_TOTAL, TTFB_MS
+
+
+def _utc_ts() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _path_label(path: str) -> str:
+    """Bound cardinality for Prometheus: collapse dynamic segments if added later."""
+    return path
+
+
+def _emit_request_complete(
+    *,
+    request: Request,
+    status_code: int,
+    latency_ms: float,
+    ttfb_ms: float | None,
+    stream: bool,
+) -> None:
+    settings = get_settings()
+    session_id = getattr(request.state, "session_id", None)
+    fields = {
+        "ts": _utc_ts(),
+        "level": "INFO",
+        "service": settings.service_name,
+        "request_id": getattr(request.state, "request_id", None),
+        "trace_id": getattr(request.state, "trace_id", None),
+        "session_id": session_id,
+        "path": request.url.path,
+        "method": request.method,
+        "status_code": status_code,
+        "latency_ms": round(latency_ms, 3),
+        "stream": stream,
+        "backend": "orchestrator"
+        if request.url.path == "/api/chat" and request.method == "POST"
+        else "-",
+    }
+    if ttfb_ms is not None:
+        fields["ttfb_ms"] = round(ttfb_ms, 3)
+
+    log_event("request_complete", **fields)
+
+    path_l = _path_label(request.url.path)
+    REQUESTS_TOTAL.labels(method=request.method, path=path_l, status=str(status_code)).inc()
+    LATENCY_MS.labels(method=request.method, path=path_l).observe(latency_ms)
+    if ttfb_ms is not None:
+        TTFB_MS.labels(method=request.method, path=path_l).observe(ttfb_ms)
+
+
+class StructuredAccessLogMiddleware(BaseHTTPMiddleware):
+    """Log ``request_complete``; for SSE, measure TTFB and total stream time."""
+
+    async def dispatch(self, request: Request, call_next) -> Response:
+        start = time.perf_counter()
+        response = await call_next(request)
+
+        if isinstance(response, StreamingResponse):
+            body = response.body_iterator
+
+            async def logging_wrapper():
+                try:
+                    async for chunk in body:
+                        if await request.is_disconnected():
+                            break
+                        yield chunk
+                finally:
+                    latency_ms = (time.perf_counter() - start) * 1000
+                    ttfb = getattr(request.state, "stream_ttfb_ms", None)
+                    stream = getattr(request.state, "access_log_stream", True)
+                    _emit_request_complete(
+                        request=request,
+                        status_code=response.status_code,
+                        latency_ms=latency_ms,
+                        ttfb_ms=ttfb,
+                        stream=stream,
+                    )
+
+            return StreamingResponse(
+                logging_wrapper(),
+                status_code=response.status_code,
+                headers=dict(response.headers),
+                media_type=response.media_type,
+                background=getattr(response, "background", None),
+            )
+
+        latency_ms = (time.perf_counter() - start) * 1000
+        stream = getattr(request.state, "access_log_stream", False)
+        _emit_request_complete(
+            request=request,
+            status_code=response.status_code,
+            latency_ms=latency_ms,
+            ttfb_ms=None,
+            stream=stream,
+        )
+        return response

@@ -121,5 +121,11 @@ async def test_flat_headers_stream_parses_sse_tokens():
         chunks = [c async for c in orchestrator.stream_chat(_payload(), _ctx(stream=True))]
 
     assert len(chunks) == 2
-    assert '"text":"Hello"' in chunks[0]
-    assert '"text":" world"' in chunks[1]
+    import json as json_mod
+
+    def _token_text(chunk: str) -> str:
+        line = [ln for ln in chunk.splitlines() if ln.startswith("data:")][0]
+        return json_mod.loads(line[len("data:") :].strip())["text"]
+
+    assert _token_text(chunks[0]) == "Hello"
+    assert _token_text(chunks[1]) == " world"

@@ -1,5 +1,6 @@
 from fastapi.testclient import TestClient
 
+from app.core.config import get_settings
 from app.main import create_app
 
 
@@ -19,7 +20,9 @@ class StubWithFeedback:
         return 200, {"ok": True}
 
 
-def test_feedback_returns_501_when_contract_is_gateway_json():
+def test_feedback_returns_501_when_contract_is_gateway_json(monkeypatch):
+    monkeypatch.setenv("ORCHESTRATOR_CONTRACT", "gateway_json")
+    get_settings.cache_clear()
     app = create_app()
     with TestClient(app) as client:
         response = client.post(
@@ -28,6 +31,7 @@ def test_feedback_returns_501_when_contract_is_gateway_json():
             json={"trace_id": "req-123", "rating": "thumbs_up"},
         )
     assert response.status_code == 501
+    get_settings.cache_clear()
 
 
 def test_feedback_requires_auth():

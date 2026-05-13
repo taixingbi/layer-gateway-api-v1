@@ -17,7 +17,7 @@ flowchart TD
 
 ### Gateway API
 - Validate bearer token and build trusted auth context.
-- Generate/propagate `request_id`, `trace_id`, and `session_id`.
+- Generate/propagate `request_id`, `trace_id`, and `session_id` (session from `X-Session-Id` header when present, else body, else minted).
 - Validate and normalize input payload.
 - Call orchestrator with timeout/retry and map errors.
 - Return a stable frontend contract.
@@ -27,10 +27,19 @@ flowchart TD
 - Orchestrate prompts, tools, retrieval, and model routing.
 - Return structured answer payload to gateway.
 
+## Middleware pipeline (request order)
+
+Outermost first on the incoming request:
+
+1. **Request context** — `X-Request-Id`, `X-Trace-Id` (or generated); echo on response.
+2. **Structured access log** — `request_complete` JSON log + Prometheus observe on completion (for SSE, wraps the body iterator for total latency and client disconnect).
+3. **Auth** — bearer stub (production: JWT / API key); does not trust client role headers for upstream.
+4. **Inflight limit** — bounded concurrency; **503** when over cap (health/ready/metrics/docs exempt).
+
 ## API Contracts
 ### Frontend -> Gateway (`POST /api/chat`)
 Request:
-- `session_id` (optional, generated if missing)
+- `X-Session-Id` header (optional): session continuity; if omitted the gateway mints `sess_…` (never accept `session_id` in JSON — `extra=forbid`).
 - `conversation_id` (optional)
 - `message` (required)
 - `client_timestamp` (optional)
@@ -38,6 +47,7 @@ Request:
 
 Headers:
 - `Authorization: Bearer <token>`
+- `X-Session-Id` (optional, preferred for session continuity)
 - `X-Request-Id` (optional)
 - `X-Trace-Id` (optional)
 
@@ -69,10 +79,14 @@ Streaming events:
 - `app/main.py`: app creation and lifespan dependencies.
 - `app/core/config.py`: environment-driven settings.
 - `app/core/logging.py`: structured log helper.
-- `app/middleware/auth.py`: auth guard and context extraction.
 - `app/middleware/request_context.py`: correlation IDs.
+- `app/middleware/access_log.py`: `request_complete` logging and histogram updates.
+- `app/middleware/inflight.py`: concurrency cap (backpressure).
+- `app/middleware/auth.py`: auth guard and context extraction.
 - `app/routes/chat.py`: main gateway endpoint and SSE handling.
-- `app/routes/health.py`: liveness endpoint.
+- `app/routes/health.py`: liveness (`/health`) and readiness (`/ready`) endpoints.
+- `app/routes/metrics.py`: Prometheus scrape (`/metrics`).
+- `app/core/metrics.py`: metric definitions.
 - `app/services/orchestrator_client.py`: orchestrator transport, retry, timeout, mapping.
 - `app/schemas/*`: request/response DTO contracts.
 

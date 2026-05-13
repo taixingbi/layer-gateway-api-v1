@@ -115,7 +115,7 @@ class OrchestratorClient:
     async def stream_chat(
         self, payload: OrchestratorChatRequest, ctx: OrchestratorCallContext
     ) -> AsyncGenerator[str, None]:
-        """Stream orchestrator output and convert chunks to gateway SSE token events."""
+        """Stream orchestrator output; no HTTP retries after the stream begins (retry only safe pre-stream)."""
         if self._settings.orchestrator_contract == "flat_headers":
             async for ev in self._stream_chat_flat(payload, ctx):
                 yield ev
@@ -172,6 +172,22 @@ class OrchestratorClient:
                     yield token_chunk
         except httpx.TimeoutException as exc:
             raise HTTPException(status_code=504, detail="Orchestrator stream timeout") from exc
+
+    async def readiness_check(self) -> tuple[bool, str | None]:
+        """GET configured path on orchestrator base URL; used by gateway ``/ready``."""
+        if not self._settings.orchestrator_readiness_probe_enabled:
+            return True, None
+        path = self._settings.orchestrator_readiness_path
+        timeout = httpx.Timeout(self._settings.orchestrator_readiness_timeout_ms / 1000)
+        try:
+            response = await self._client.get(path, timeout=timeout)
+        except httpx.TimeoutException:
+            return False, "orchestrator readiness probe timed out"
+        except httpx.RequestError as exc:
+            return False, f"orchestrator unreachable: {exc}"
+        if response.status_code < 200 or response.status_code >= 300:
+            return False, f"orchestrator returned HTTP {response.status_code}"
+        return True, None
 
     async def post_feedback(self, body: dict[str, Any]) -> tuple[int, dict[str, Any] | list[Any] | None]:
         """POST feedback JSON to orchestrator; returns (status_code, parsed_json_or_none)."""
