@@ -8,6 +8,7 @@ from app.core.logging import configure_logging
 from app.middleware.auth import AuthMiddleware
 from app.middleware.request_context import RequestContextMiddleware
 from app.routes.chat import router as chat_router
+from app.routes.feedback import router as feedback_router
 from app.routes.health import router as health_router
 from app.services.orchestrator_client import OrchestratorClient
 
@@ -30,6 +31,7 @@ def create_app() -> FastAPI:
     app.add_middleware(AuthMiddleware)
 
     app.include_router(chat_router)
+    app.include_router(feedback_router)
     app.include_router(health_router)
     return app
 

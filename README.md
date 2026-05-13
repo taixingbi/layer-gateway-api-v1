@@ -31,14 +31,20 @@ app/
     request_context.py
   routes/
     chat.py
+    feedback.py
     health.py
   schemas/
     chat_request.py
     chat_response.py
+    feedback.py
     orchestrator.py
   services/
+    orchestrator_call_context.py
     orchestrator_client.py
 tests/
+.github/workflows/
+Dockerfile
+docker-compose.yml
 docs/
   plan.md
   design.md
@@ -56,27 +62,39 @@ pip install -e ".[dev]"
 
 ### 2) Configure environment
 
-Create a `.env` file (optional). Defaults are in `app/core/config.py`.
+Copy the template and edit as needed:
 
-Example:
+```bash
+cp .env.example .env
+```
+
+Defaults also live in [`app/core/config.py`](app/core/config.py). `.env.example` documents all variables, including `ORCHESTRATOR_CONTRACT` (`gateway_json` vs `flat_headers`) and stub auth fields used as upstream `X-User-*` headers in flat mode.
+
+Example fragment for a header-style orchestrator (see `.env.example` for the full file):
 
 ```env
-APP_NAME=layer-gateway-api-v1
-ENV=dev
-ORCHESTRATOR_BASE_URL=http://localhost:8080
+ORCHESTRATOR_BASE_URL=http://192.168.86.179:30184
+ORCHESTRATOR_CHAT_PATH=/orchestrator/answer
+ORCHESTRATOR_FEEDBACK_PATH=/feedback
+ORCHESTRATOR_CONTRACT=flat_headers
+AUTH_STUB_USER_ID=taixing
+AUTH_STUB_ROLES=hr
+AUTH_STUB_GROUPS=engineering
+AUTH_STUB_TEAMS=rag-platform
+```
+
+Legacy nested JSON orchestrator (default in code when unset):
+
+```env
+ORCHESTRATOR_BASE_URL=http://192.168.86.179:30184
 ORCHESTRATOR_CHAT_PATH=/v1/orchestrator/chat
-ORCHESTRATOR_TIMEOUT_MS=15000
-ORCHESTRATOR_RETRY_MAX_ATTEMPTS=2
-AUTH_MODE=stub
-AUTH_STUB_USER_ID=user_001
-AUTH_STUB_TENANT_ID=tenant_01
-CHAT_MESSAGE_MAX_LENGTH=4000
+ORCHESTRATOR_CONTRACT=gateway_json
 ```
 
 ### 3) Run server
 
 ```bash
-uvicorn app.main:app --host 0.0.0.0 --port 8010 --reload
+uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
 ### 4) Run tests
@@ -84,6 +102,39 @@ uvicorn app.main:app --host 0.0.0.0 --port 8010 --reload
 ```bash
 pytest
 ```
+
+### Docker
+
+Build and run locally (port 8000; use `.env` from `cp .env.example .env`):
+
+```bash
+docker build -t layer-gateway-api-v1 .
+docker run -p 8000:8000 --env-file .env layer-gateway-api-v1
+```
+
+Or with Compose:
+
+```bash
+docker compose up --build
+```
+
+Run an image published from CI (replace `YOUR_DOCKERHUB_USER` with your Docker Hub username or org):
+
+```bash
+docker pull YOUR_DOCKERHUB_USER/layer-gateway-api-v1:latest
+docker run -p 8000:8000 --env-file .env YOUR_DOCKERHUB_USER/layer-gateway-api-v1:latest
+```
+
+**Docker Hub:** pushes to `main`, tags matching `v*`, and manual **workflow_dispatch** build and push the image (see [`.github/workflows/docker-push.yml`](.github/workflows/docker-push.yml)). Add repository secrets **Settings → Secrets and variables → Actions**:
+
+| Secret | Description |
+| --- | --- |
+| `DOCKERHUB_USERNAME` | Docker Hub username or organization |
+| `DOCKERHUB_TOKEN` | Docker Hub access token (recommended) |
+
+Images: `YOUR_DOCKERHUB_USER/layer-gateway-api-v1:latest`, `YOUR_DOCKERHUB_USER/layer-gateway-api-v1:<version-or-short-sha>`, and `YOUR_DOCKERHUB_USER/layer-gateway-api-v1:<full-git-sha>`.
+
+**CI:** [`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs `pytest` on pushes and pull requests to `main`.
 
 ## API
 
@@ -94,7 +145,7 @@ pytest
 curl:
 
 ```bash
-curl -sS http://localhost:8010/health
+curl -sS http://localhost:8000/health
 ```
 
 Response:
@@ -117,7 +168,7 @@ Headers:
 curl:
 
 ```bash
-curl -sS http://localhost:8010/api/chat \
+curl -sS http://localhost:8000/api/chat \
   -H "Authorization: Bearer demo-token" \
   -H "Content-Type: application/json" \
   -H "X-Request-Id: req_demo_001" \
@@ -175,7 +226,7 @@ Use either:
 curl:
 
 ```bash
-curl -N http://localhost:8010/api/chat?stream=true \
+curl -N http://localhost:8000/api/chat?stream=true \
   -H "Authorization: Bearer demo-token" \
   -H "Content-Type: application/json" \
   -H "Accept: text/event-stream" \

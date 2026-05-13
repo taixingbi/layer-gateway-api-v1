@@ -4,7 +4,7 @@ from app.main import create_app
 
 
 class StubOrchestratorClient:
-    async def chat(self, payload):
+    async def chat(self, payload, ctx=None):
         return type(
             "Resp",
             (),
@@ -15,7 +15,7 @@ class StubOrchestratorClient:
             },
         )()
 
-    async def stream_chat(self, payload):
+    async def stream_chat(self, payload, ctx=None):
         yield 'event: token\ndata: {"text":"Hello"}\n\n'
         yield 'event: token\ndata: {"text":" world"}\n\n'
 

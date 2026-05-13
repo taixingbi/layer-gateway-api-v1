@@ -26,9 +26,9 @@ htmlcov/
 .ruff_cache/
 .pyre/
 
-# Environment and local config
+# Environment and local config (keep `.env.example` committed as a template)
 .env
-.env.*
+.env.local
 
 # IDE/editor files
 .vscode/

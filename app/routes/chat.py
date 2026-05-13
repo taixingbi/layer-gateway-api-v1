@@ -15,6 +15,7 @@ from app.schemas.orchestrator import (
     OrchestratorContext,
     OrchestratorInput,
 )
+from app.services.orchestrator_call_context import OrchestratorCallContext
 
 router = APIRouter(prefix="/api", tags=["chat"])
 
@@ -66,6 +67,25 @@ def _build_orchestrator_request(payload: ChatRequest, request: Request) -> Orche
     )
 
 
+def _build_call_context(
+    request: Request, orchestrator_payload: OrchestratorChatRequest, stream: bool
+) -> OrchestratorCallContext:
+    auth = request.state.auth_context
+    roles = tuple(auth.get("roles") or [])
+    groups = tuple(auth.get("groups") or [])
+    teams = tuple(auth.get("teams") or [])
+    return OrchestratorCallContext(
+        session_id=orchestrator_payload.context.session_id,
+        request_id=orchestrator_payload.context.request_id,
+        trace_id=orchestrator_payload.context.trace_id,
+        user_id=auth["user_id"],
+        roles=roles,
+        groups=groups,
+        teams=teams,
+        stream=stream,
+    )
+
+
 @router.post("/chat", response_model=ChatResponse)
 async def chat(request: Request, payload: ChatRequest):
     # Record ingress event with correlation fields before processing.
@@ -90,7 +110,8 @@ async def chat(request: Request, payload: ChatRequest):
     try:
         # Non-stream path performs single request/response orchestration call.
         log_event("orchestrator_call_started", request_id=request.state.request_id, trace_id=request.state.trace_id)
-        result = await client.chat(orchestrator_payload)
+        ctx = _build_call_context(request, orchestrator_payload, stream=False)
+        result = await client.chat(orchestrator_payload, ctx)
         log_event("orchestrator_call_succeeded", request_id=request.state.request_id, trace_id=request.state.trace_id)
         return ChatResponse(
             status="success",
@@ -122,9 +143,10 @@ async def _stream_response(request: Request, orchestrator_payload: OrchestratorC
     }
     yield f"event: meta\ndata: {json.dumps(meta)}\n\n"
     client = request.app.state.orchestrator_client
+    ctx = _build_call_context(request, orchestrator_payload, stream=True)
     try:
         # Forward normalized token events from orchestrator stream.
-        async for token_event in client.stream_chat(orchestrator_payload):
+        async for token_event in client.stream_chat(orchestrator_payload, ctx):
             yield token_event
         # Mark stream completion with terminal success event.
         yield "event: done\ndata: {\"status\":\"success\"}\n\n"

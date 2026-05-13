@@ -5,6 +5,10 @@ from starlette.responses import JSONResponse, Response
 from app.core.config import get_settings
 
 
+def _split_csv(raw: str) -> list[str]:
+    return [p.strip() for p in raw.split(",") if p.strip()]
+
+
 class AuthMiddleware(BaseHTTPMiddleware):
     """Authenticate incoming requests and attach trusted auth context."""
 
@@ -31,10 +35,15 @@ class AuthMiddleware(BaseHTTPMiddleware):
 
         # Current MVP uses stub auth claims from settings; replace with IdP lookup.
         settings = get_settings()
+        roles = _split_csv(settings.auth_stub_roles or "")
+        if not roles:
+            roles = ["customer"]
         request.state.auth_context = {
             "user_id": settings.auth_stub_user_id,
             "tenant_id": settings.auth_stub_tenant_id,
-            "roles": ["customer"],
+            "roles": roles,
+            "groups": _split_csv(settings.auth_stub_groups or ""),
+            "teams": _split_csv(settings.auth_stub_teams or ""),
         }
 
         # Hand off to next layer after attaching trusted user context.
