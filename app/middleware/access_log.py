@@ -1,7 +1,6 @@
 """Structured access logging and Prometheus observation for every request."""
 
 import time
-from datetime import datetime, timezone
 from typing import Any
 
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -11,10 +10,7 @@ from starlette.responses import Response, StreamingResponse
 from app.core.config import get_settings
 from app.core.logging import log_event
 from app.core.metrics import LATENCY_MS, REQUESTS_TOTAL, TTFB_MS
-
-
-def _utc_ts() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+from app.core.time_util import eastern_now_iso
 
 
 def _path_label(path: str) -> str:
@@ -43,7 +39,7 @@ def _emit_request_complete(
     settings = get_settings()
     session_id = getattr(request.state, "session_id", None)
     fields = {
-        "ts": _utc_ts(),
+        "ts": eastern_now_iso(),
         "level": "INFO",
         "service": settings.service_name,
         # Effective correlation IDs (from X-Request-Id / X-Trace-Id when present, else minted).

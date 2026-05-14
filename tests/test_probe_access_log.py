@@ -28,12 +28,14 @@ def test_health_request_complete_logs_correlation_headers_when_present():
                 },
             )
         assert response.status_code == 200
+    assert "x-request-id" not in {k.lower() for k in response.headers.keys()}
+    assert "x-trace-id" not in {k.lower() for k in response.headers.keys()}
 
     fields = _request_complete_kwargs(mock_log)
     assert fields is not None
     assert fields["path"] == "/health"
-    assert fields["request_id"] == "probe-req-001"
-    assert fields["trace_id"] == "probe-trace-001"
+    assert "request_id" not in fields
+    assert "trace_id" not in fields
     assert fields["x_session_id"] == "probe-sess-001"
     assert fields["x_conversation_id"] == "probe-conv-001"
 
@@ -47,8 +49,9 @@ def test_health_request_complete_mints_ids_when_headers_absent():
 
     fields = _request_complete_kwargs(mock_log)
     assert fields is not None
-    assert fields["request_id"].startswith("req_")
-    assert fields["trace_id"].startswith("trace_")
+    assert fields["path"] == "/health"
+    assert "request_id" not in fields
+    assert "trace_id" not in fields
     assert "x_session_id" not in fields
     assert "x_conversation_id" not in fields
     assert "session_id" not in fields
@@ -64,5 +67,5 @@ def test_metrics_request_complete_includes_correlation_fields():
     fields = _request_complete_kwargs(mock_log)
     assert fields is not None
     assert fields["path"] == "/metrics"
-    assert fields["request_id"] == "m-req-1"
-    assert fields["trace_id"] == "m-tr-1"
+    assert "request_id" not in fields
+    assert "trace_id" not in fields
