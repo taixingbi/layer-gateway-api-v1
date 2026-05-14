@@ -72,20 +72,23 @@ Copy the template and edit as needed:
 cp .env.example .env
 ```
 
-Defaults also live in [`app/core/config.py`](app/core/config.py). `.env.example` documents all variables, including `ORCHESTRATOR_CONTRACT` (`gateway_json` vs `flat_headers`) and stub auth fields used as upstream `X-User-*` headers in flat mode.
+Defaults also live in [`app/core/config.py`](app/core/config.py). `.env.example` documents all variables, including `ORCHESTRATOR_CONTRACT` (`gateway_json` vs `flat_headers`), `AUTH_MODE` (`stub` vs `jwt`), stub auth fields for local dev, and JWT settings (`AUTH_JWT_*`) for production IdP verification.
 
-Example fragment for a header-style orchestrator (see `.env.example` for the full file):
+Example fragment for a header-style orchestrator with **stub auth** (see `.env.example` for the full file):
 
 ```env
 ORCHESTRATOR_BASE_URL=http://192.168.86.179:30184
 ORCHESTRATOR_CHAT_PATH=/orchestrator/answer
 ORCHESTRATOR_FEEDBACK_PATH=/feedback
 ORCHESTRATOR_CONTRACT=flat_headers
+AUTH_MODE=stub
 AUTH_STUB_USER_ID=taixing
 AUTH_STUB_ROLES=hr
 AUTH_STUB_GROUPS=engineering
 AUTH_STUB_TEAMS=rag-platform
 ```
+
+**Production JWT** (`AUTH_MODE=jwt`): set `AUTH_JWT_ISSUER`, `AUTH_JWT_AUDIENCE` (comma-separated if multiple), and `AUTH_JWT_JWKS_URL` from your OIDC provider (issuer, API audience, JWKS URI). Optional: `AUTH_JWT_CLAIM_*` and `AUTH_JWT_DEFAULT_TENANT_ID` to map claims into gateway `user_id`, `tenant_id`, `roles`, `groups`, and `teams`. The gateway verifies signature (RS256/ES256 by default), `iss`, `aud`, and `exp`.
 
 Legacy nested JSON orchestrator (default in code when unset):
 
@@ -311,12 +314,11 @@ Non-stream orchestrator calls use bounded retries; **streaming** orchestrator ca
 
 ### Roadmap (not implemented here)
 
-Circuit breaker per upstream, health-scored routing, JWT/API-key auth, rate limits, queue wait time / max age, graceful shutdown hooks beyond uvicorn defaults, and richer header sanitization — good next steps aligned with production AI gateways.
+Circuit breaker per upstream, health-scored routing, static API-key auth, rate limits, queue wait time / max age, graceful shutdown hooks beyond uvicorn defaults, and richer header sanitization — good next steps aligned with production AI gateways.
 
 ## Notes
 
-- Current auth is a stub middleware that validates bearer shape and injects trusted context from config.
-- Replace stub auth with real JWT/IdP verification for production.
+- **Auth:** `AUTH_MODE=stub` (default) accepts any non-empty Bearer token and injects trusted identity from `AUTH_STUB_*`. **`AUTH_MODE=jwt`** verifies OIDC access tokens against `AUTH_JWT_JWKS_URL` with issuer/audience checks and builds trusted context from JWT claims (see `.env.example`).
 - Orchestrator contract is env-driven (`gateway_json` vs `flat_headers`); see README and `app/core/config.py`.
 
 ## Docs

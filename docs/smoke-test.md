@@ -2,7 +2,7 @@
 
 Quick checks against a running gateway. Replace the host/port in each example if yours differs (e.g. `http://localhost:8000`).
 
-Stub auth accepts any non-empty bearer token (see `app/middleware/auth.py`).
+Stub auth (`AUTH_MODE=stub`, default) accepts any non-empty bearer token (see `app/middleware/auth.py`). With **`AUTH_MODE=jwt`**, use a real access token from your IdP (`Authorization: Bearer <jwt>`); invalid or expired tokens return **401**.
 
 ## No auth (probes and metrics)
 

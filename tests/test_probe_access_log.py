@@ -14,7 +14,8 @@ def _request_complete_kwargs(mock_log_event):
     return None
 
 
-def test_health_request_complete_logs_correlation_headers_when_present():
+def test_health_request_complete_with_optional_headers_still_omits_probe_correlation_fields():
+    """Probe routes do not attach request/trace/session to access-log state; headers are ignored for ``request_complete``."""
     with patch("app.middleware.access_log.log_event") as mock_log:
         app = create_app()
         with TestClient(app) as client:
@@ -22,7 +23,6 @@ def test_health_request_complete_logs_correlation_headers_when_present():
                 "/health",
                 headers={
                     "X-Session-Id": "probe-sess-001",
-                    "X-Conversation-Id": "probe-conv-001",
                     "X-Request-Id": "probe-req-001",
                     "X-Trace-Id": "probe-trace-001",
                 },
@@ -36,8 +36,7 @@ def test_health_request_complete_logs_correlation_headers_when_present():
     assert fields["path"] == "/health"
     assert "request_id" not in fields
     assert "trace_id" not in fields
-    assert fields["x_session_id"] == "probe-sess-001"
-    assert fields["x_conversation_id"] == "probe-conv-001"
+    assert "session_id" not in fields
 
 
 def test_health_request_complete_mints_ids_when_headers_absent():
@@ -53,7 +52,6 @@ def test_health_request_complete_mints_ids_when_headers_absent():
     assert "request_id" not in fields
     assert "trace_id" not in fields
     assert "x_session_id" not in fields
-    assert "x_conversation_id" not in fields
     assert "session_id" not in fields
 
 

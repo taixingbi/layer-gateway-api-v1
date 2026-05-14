@@ -10,7 +10,6 @@ from starlette.responses import Response, StreamingResponse
 from app.core.config import get_settings
 from app.core.logging import log_event
 from app.core.metrics import LATENCY_MS, REQUESTS_TOTAL, TTFB_MS
-from app.core.time_util import eastern_now_iso
 
 
 def _path_label(path: str) -> str:
@@ -18,13 +17,8 @@ def _path_label(path: str) -> str:
     return path
 
 
-def _inbound_header(request: Request, name: str) -> str | None:
-    raw = (request.headers.get(name) or "").strip()
-    return raw or None
-
-
 def _omit_none_values(fields: dict[str, Any]) -> dict[str, Any]:
-    """Drop null optional fields so JSON logs stay compact (e.g. no x_session_id on /health)."""
+    """Drop null optional fields so JSON logs stay compact."""
     return {k: v for k, v in fields.items() if v is not None}
 
 
@@ -39,15 +33,10 @@ def _emit_request_complete(
     settings = get_settings()
     session_id = getattr(request.state, "session_id", None)
     fields = {
-        "ts": eastern_now_iso(),
-        "level": "INFO",
         "service": settings.service_name,
         # Effective correlation IDs (from X-Request-Id / X-Trace-Id when present, else minted).
         "request_id": getattr(request.state, "request_id", None),
         "trace_id": getattr(request.state, "trace_id", None),
-        # Inbound optional headers (logged for every path, including /health /ready /metrics).
-        "x_session_id": _inbound_header(request, "x-session-id"),
-        "x_conversation_id": _inbound_header(request, "x-conversation-id"),
         "session_id": session_id,
         "path": request.url.path,
         "method": request.method,

@@ -1,13 +1,36 @@
+import asyncio
+
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
 from app.core.config import get_settings
 from app.middleware.paths import PUBLIC_PROBE_PATHS
+from app.services.jwt_validator import JwtVerifyError
 
 
 def _split_csv(raw: str) -> list[str]:
     return [p.strip() for p in raw.split(",") if p.strip()]
+
+
+def _unauthorized(message: str = "Invalid or expired bearer token") -> JSONResponse:
+    return JSONResponse(
+        status_code=401,
+        content={"status": "error", "error": {"code": "unauthorized", "message": message}},
+    )
+
+
+def _stub_auth_context(settings) -> dict:
+    roles = _split_csv(settings.auth_stub_roles or "")
+    if not roles:
+        roles = ["customer"]
+    return {
+        "user_id": settings.auth_stub_user_id,
+        "tenant_id": settings.auth_stub_tenant_id,
+        "roles": roles,
+        "groups": _split_csv(settings.auth_stub_groups or ""),
+        "teams": _split_csv(settings.auth_stub_teams or ""),
+    }
 
 
 class AuthMiddleware(BaseHTTPMiddleware):
@@ -34,18 +57,19 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 content={"status": "error", "error": {"code": "unauthorized", "message": "Empty bearer token"}},
             )
 
-        # Current MVP uses stub auth claims from settings; replace with IdP lookup.
         settings = get_settings()
-        roles = _split_csv(settings.auth_stub_roles or "")
-        if not roles:
-            roles = ["customer"]
-        request.state.auth_context = {
-            "user_id": settings.auth_stub_user_id,
-            "tenant_id": settings.auth_stub_tenant_id,
-            "roles": roles,
-            "groups": _split_csv(settings.auth_stub_groups or ""),
-            "teams": _split_csv(settings.auth_stub_teams or ""),
-        }
+        if settings.auth_mode == "stub":
+            request.state.auth_context = _stub_auth_context(settings)
+            return await call_next(request)
 
-        # Hand off to next layer after attaching trusted user context.
+        validator = getattr(request.app.state, "jwt_validator", None)
+        if validator is None:
+            return _unauthorized()
+
+        try:
+            auth_context = await asyncio.to_thread(validator.verify_to_auth_context, token)
+        except JwtVerifyError:
+            return _unauthorized()
+
+        request.state.auth_context = auth_context
         return await call_next(request)

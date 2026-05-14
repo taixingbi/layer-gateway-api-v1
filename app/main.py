@@ -13,12 +13,17 @@ from app.routes.chat import router as chat_router
 from app.routes.feedback import router as feedback_router
 from app.routes.health import router as health_router
 from app.routes.metrics import router as metrics_router
+from app.services.jwt_validator import JwtValidator
 from app.services.orchestrator_client import OrchestratorClient
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings = get_settings()
+    if settings.auth_mode == "jwt":
+        app.state.jwt_validator = JwtValidator(settings)
+    else:
+        app.state.jwt_validator = None
     timeout = httpx.Timeout(settings.orchestrator_timeout_ms / 1000)
     async with httpx.AsyncClient(base_url=settings.orchestrator_base_url, timeout=timeout) as client:
         app.state.orchestrator_client = OrchestratorClient(client=client, settings=settings)
