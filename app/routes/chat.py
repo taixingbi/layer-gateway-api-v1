@@ -159,6 +159,7 @@ async def chat(request: Request, payload: ChatRequest):
     log_event(
         "request_received",
         path="/api/chat",
+        method=request.method,
         request_id=request.state.request_id,
         trace_id=request.state.trace_id,
         session_id=request.state.session_id,
@@ -168,6 +169,7 @@ async def chat(request: Request, payload: ChatRequest):
     log_event(
         "request_validated",
         path="/api/chat",
+        method=request.method,
         request_id=request.state.request_id,
         trace_id=request.state.trace_id,
         session_id=request.state.session_id,
