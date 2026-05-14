@@ -104,9 +104,25 @@ def test_chat_streaming_contract():
     with TestClient(app) as client:
         app.state.orchestrator_client = StubOrchestratorClient()
         response = client.post(
-            "/api/chat?stream=true",
+            "/api/chat",
             headers={**_auth_headers(), "Accept": "text/event-stream"},
             json={"message": "stream please"},
+        )
+        assert response.status_code == 200
+        body = response.text
+        assert "event: meta" in body
+        assert "event: token" in body
+        assert "event: done" in body
+
+
+def test_chat_streaming_via_json_body_stream_flag():
+    app = create_app()
+    with TestClient(app) as client:
+        app.state.orchestrator_client = StubOrchestratorClient()
+        response = client.post(
+            "/api/chat",
+            headers=_auth_headers(),
+            json={"message": "stream via body", "stream": True, "metadata": {}},
         )
         assert response.status_code == 200
         body = response.text

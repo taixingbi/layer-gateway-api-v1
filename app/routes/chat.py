@@ -110,8 +110,9 @@ async def chat(request: Request, payload: ChatRequest):
     log_event("request_validated", request_id=request.state.request_id, trace_id=request.state.trace_id)
     orchestrator_payload = _build_orchestrator_request(payload, request)
 
-    # Streaming can be requested via Accept header or explicit query flag.
-    wants_stream = "text/event-stream" in request.headers.get("accept", "") or request.query_params.get("stream") == "true"
+    # Streaming: `Accept: text/event-stream` or JSON `"stream": true` (query flags are not supported).
+    accept = (request.headers.get("accept") or "").lower()
+    wants_stream = "text/event-stream" in accept or payload.stream is True
     client = request.app.state.orchestrator_client
 
     if wants_stream:

@@ -238,13 +238,13 @@ Success response:
 ### Chat (SSE stream)
 
 Use either:
-- query flag: `POST /api/chat?stream=true`, or
 - header: `Accept: text/event-stream`
+- JSON body: `"stream": true`
 
 curl:
 
 ```bash
-curl -N http://localhost:8000/api/chat?stream=true \
+curl -N http://localhost:8000/api/chat \
   -H "Authorization: Bearer demo-token" \
   -H "Content-Type: application/json" \
   -H "Accept: text/event-stream" \
