@@ -13,3 +13,4 @@ class OrchestratorCallContext:
     groups: tuple[str, ...]
     teams: tuple[str, ...]
     stream: bool
+    conversation_id: str | None = None

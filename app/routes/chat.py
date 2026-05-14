@@ -65,6 +65,19 @@ def _resolve_session_id(request: Request) -> str:
     return _generate_session_id()
 
 
+def _resolve_conversation_id(request: Request, payload: ChatRequest) -> str | None:
+    """Prefer ``X-Conversation-Id`` when set (3–128 chars); otherwise JSON ``conversation_id``."""
+    header_raw = (request.headers.get("x-conversation-id") or "").strip()
+    if header_raw:
+        if len(header_raw) < 3 or len(header_raw) > 128:
+            raise HTTPException(
+                status_code=400,
+                detail="X-Conversation-Id must be between 3 and 128 characters",
+            )
+        return header_raw
+    return payload.conversation_id
+
+
 def _normalize_request(payload: ChatRequest, request: Request) -> ChatRequest:
     """Normalize and validate chat input before downstream orchestration."""
     message = payload.message.strip()
@@ -94,7 +107,7 @@ def _build_orchestrator_request(payload: ChatRequest, request: Request) -> Orche
         auth=AuthContext(**auth_context),
         context=OrchestratorContext(
             session_id=session_id,
-            conversation_id=payload.conversation_id,
+            conversation_id=_resolve_conversation_id(request, payload),
             request_id=request_id,
             trace_id=trace_id,
         ),
@@ -123,6 +136,7 @@ def _build_call_context(
         groups=groups,
         teams=teams,
         stream=stream,
+        conversation_id=orchestrator_payload.context.conversation_id,
     )
 
 

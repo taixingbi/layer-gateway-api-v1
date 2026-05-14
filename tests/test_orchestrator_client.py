@@ -25,7 +25,7 @@ def _payload() -> OrchestratorChatRequest:
     )
 
 
-def _ctx(stream: bool = False) -> OrchestratorCallContext:
+def _ctx(stream: bool = False, conversation_id: str | None = None) -> OrchestratorCallContext:
     return OrchestratorCallContext(
         session_id="sess_1",
         request_id="req_1",
@@ -35,6 +35,7 @@ def _ctx(stream: bool = False) -> OrchestratorCallContext:
         groups=("engineering",),
         teams=("rag-platform",),
         stream=stream,
+        conversation_id=conversation_id,
     )
 
 
@@ -98,6 +99,29 @@ async def test_flat_headers_chat_posts_headers_and_flat_json():
     assert h.get("x-user-groups") == "engineering"
     assert h.get("x-user-teams") == "rag-platform"
     assert captured["body"] == {"question": "Hello", "stream": False}
+
+
+@pytest.mark.asyncio
+async def test_flat_headers_sends_conversation_id_when_set():
+    settings = Settings(
+        orchestrator_retry_max_attempts=1,
+        orchestrator_contract="flat_headers",
+        orchestrator_chat_path="/orchestrator/answer",
+    )
+    captured: dict = {}
+
+    async def handler(request: httpx.Request):
+        captured["headers"] = dict(request.headers)
+        captured["body"] = json.loads(request.content.decode())
+        return httpx.Response(200, json={"answer": "ok", "citations": [], "usage": {}})
+
+    transport = httpx.MockTransport(handler)
+    async with httpx.AsyncClient(base_url="http://test", transport=transport) as client:
+        orchestrator = OrchestratorClient(client=client, settings=settings)
+        await orchestrator.chat(_payload(), _ctx(stream=False, conversation_id="conv-99"))
+
+    assert captured["headers"].get("x-conversation-id") == "conv-99"
+    assert captured["body"] == {"question": "Hello", "stream": False, "conversation_id": "conv-99"}
 
 
 @pytest.mark.asyncio

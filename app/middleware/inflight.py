@@ -6,10 +6,11 @@ from starlette.responses import JSONResponse, Response
 
 from app.core.config import get_settings
 from app.core.metrics import INFLIGHT, REJECTED_TOTAL
+from app.middleware.paths import PUBLIC_PROBE_PATHS
 
 
 def _exempt_path(path: str) -> bool:
-    return path in ("/health", "/ready", "/metrics") or path.startswith("/docs") or path == "/openapi.json"
+    return path in PUBLIC_PROBE_PATHS or path.startswith("/docs") or path == "/openapi.json"
 
 
 class InflightLimitMiddleware(BaseHTTPMiddleware):

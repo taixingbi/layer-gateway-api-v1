@@ -2,6 +2,7 @@
 
 import time
 from datetime import datetime, timezone
+from typing import Any
 
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
@@ -21,6 +22,16 @@ def _path_label(path: str) -> str:
     return path
 
 
+def _inbound_header(request: Request, name: str) -> str | None:
+    raw = (request.headers.get(name) or "").strip()
+    return raw or None
+
+
+def _omit_none_values(fields: dict[str, Any]) -> dict[str, Any]:
+    """Drop null optional fields so JSON logs stay compact (e.g. no x_session_id on /health)."""
+    return {k: v for k, v in fields.items() if v is not None}
+
+
 def _emit_request_complete(
     *,
     request: Request,
@@ -35,8 +46,12 @@ def _emit_request_complete(
         "ts": _utc_ts(),
         "level": "INFO",
         "service": settings.service_name,
+        # Effective correlation IDs (from X-Request-Id / X-Trace-Id when present, else minted).
         "request_id": getattr(request.state, "request_id", None),
         "trace_id": getattr(request.state, "trace_id", None),
+        # Inbound optional headers (logged for every path, including /health /ready /metrics).
+        "x_session_id": _inbound_header(request, "x-session-id"),
+        "x_conversation_id": _inbound_header(request, "x-conversation-id"),
         "session_id": session_id,
         "path": request.url.path,
         "method": request.method,
@@ -50,7 +65,7 @@ def _emit_request_complete(
     if ttfb_ms is not None:
         fields["ttfb_ms"] = round(ttfb_ms, 3)
 
-    log_event("request_complete", **fields)
+    log_event("request_complete", **_omit_none_values(fields))
 
     path_l = _path_label(request.url.path)
     REQUESTS_TOTAL.labels(method=request.method, path=path_l, status=str(status_code)).inc()

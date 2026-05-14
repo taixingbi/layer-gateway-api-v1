@@ -3,6 +3,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
 from app.core.config import get_settings
+from app.middleware.paths import PUBLIC_PROBE_PATHS
 
 
 def _split_csv(raw: str) -> list[str]:
@@ -14,7 +15,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
 
     async def dispatch(self, request: Request, call_next) -> Response:
         # Keep health checks unauthenticated for probes and uptime monitors.
-        if request.url.path in ("/health", "/ready", "/metrics"):
+        if request.url.path in PUBLIC_PROBE_PATHS:
             return await call_next(request)
 
         # Require bearer token on all gateway business endpoints.

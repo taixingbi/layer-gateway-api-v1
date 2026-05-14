@@ -18,7 +18,7 @@ class OrchestratorClient:
         self._settings = settings
 
     def _flat_headers(self, ctx: OrchestratorCallContext) -> dict[str, str]:
-        return {
+        h: dict[str, str] = {
             "X-Session-Id": ctx.session_id,
             "X-Request-Id": ctx.request_id,
             "X-Trace-Id": ctx.trace_id,
@@ -27,9 +27,15 @@ class OrchestratorClient:
             "X-User-Groups": ",".join(ctx.groups),
             "X-User-Teams": ",".join(ctx.teams),
         }
+        if ctx.conversation_id:
+            h["X-Conversation-Id"] = ctx.conversation_id
+        return h
 
     def _flat_json_body(self, payload: OrchestratorChatRequest, ctx: OrchestratorCallContext) -> dict[str, Any]:
-        return {"question": payload.input.question, "stream": ctx.stream}
+        body: dict[str, Any] = {"question": payload.input.question, "stream": ctx.stream}
+        if ctx.conversation_id:
+            body["conversation_id"] = ctx.conversation_id
+        return body
 
     async def chat(self, payload: OrchestratorChatRequest, ctx: OrchestratorCallContext) -> OrchestratorChatResponse:
         """Send non-stream chat requests with bounded retries and mapped errors."""
@@ -79,6 +85,7 @@ class OrchestratorClient:
             groups=ctx.groups,
             teams=ctx.teams,
             stream=False,
+            conversation_id=ctx.conversation_id,
         )
         last_error: Exception | None = None
         for attempt in range(1, self._settings.orchestrator_retry_max_attempts + 1):
@@ -157,6 +164,7 @@ class OrchestratorClient:
             groups=ctx.groups,
             teams=ctx.teams,
             stream=True,
+            conversation_id=ctx.conversation_id,
         )
         try:
             headers = {**self._flat_headers(flat_ctx), "Accept": "text/event-stream"}
