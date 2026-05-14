@@ -104,5 +104,5 @@ Every request log should include:
 - `session_id` (when available)
 - `user_id` (when available)
 - `path`
-- `status_code`
+- `status`
 - `latency_ms` (when measured)

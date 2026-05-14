@@ -40,7 +40,7 @@ def _emit_request_complete(
         "session_id": session_id,
         "path": request.url.path,
         "method": request.method,
-        "status_code": status_code,
+        "status": status_code,
         "latency_ms": round(latency_ms, 3),
         "stream": stream,
         "backend": "orchestrator"

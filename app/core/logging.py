@@ -43,7 +43,7 @@ class EasternJsonFormatter(jsonlogger.JsonFormatter):
             "session_id",
             "path",
             "method",
-            "status_code",
+            "status",
             "latency_ms",
             "ttfb_ms",
             "stream",

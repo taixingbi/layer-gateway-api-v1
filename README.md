@@ -292,7 +292,7 @@ Outermost first: **request context** (`X-Request-Id` / `X-Trace-Id`) → **struc
 
 ### `request_complete` log
 
-Every finished request emits a structured log line via `python-json-logger` with fields such as: `ts`, `level`, `event` (`request_complete`), `service`, `request_id`, `trace_id`, `session_id`, `path`, `method`, `status_code`, `latency_ms`, optional `ttfb_ms` (first **upstream** SSE token after `meta` for `/api/chat` streams), `stream`, `backend` (`orchestrator` for `POST /api/chat`, else `-`).
+Every finished request emits a structured log line via `python-json-logger` with fields such as: `ts`, `level`, `event` (`request_complete`), `service`, `request_id`, `trace_id`, `session_id`, `path`, `method`, `status`, `latency_ms`, optional `ttfb_ms` (first **upstream** SSE token after `meta` for `/api/chat` streams), `stream`, `backend` (`orchestrator` for `POST /api/chat`, else `-`).
 
 ### Prometheus
 

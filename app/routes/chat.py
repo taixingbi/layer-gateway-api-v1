@@ -182,7 +182,7 @@ async def chat(request: Request, payload: ChatRequest):
         return JSONResponse(content=body.model_dump(mode="json", exclude_none=True))
     except HTTPException as exc:
         # Keep mapped HTTP semantics while logging failure context.
-        log_event("orchestrator_call_failed", request_id=request.state.request_id, trace_id=request.state.trace_id, status_code=exc.status_code)
+        log_event("orchestrator_call_failed", request_id=request.state.request_id, trace_id=request.state.trace_id, status=exc.status_code)
         raise
     except Exception as exc:  # pragma: no cover
         # Defensive fallback for unexpected gateway exceptions.

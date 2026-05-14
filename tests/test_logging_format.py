@@ -34,7 +34,7 @@ def test_eastern_json_formatter_omits_asctime_levelname(formatter: EasternJsonFo
             "session_id": "sess_123",
             "path": "/api/chat",
             "method": "POST",
-            "status_code": 200,
+            "status": 200,
             "latency_ms": 12.371,
             "stream": True,
             "backend": "orchestrator",
@@ -57,6 +57,6 @@ def test_eastern_json_formatter_omits_asctime_levelname(formatter: EasternJsonFo
         "session_id",
         "path",
         "method",
-        "status_code",
+        "status",
         "latency_ms",
     ]
