@@ -65,6 +65,16 @@ def _resolve_session_id(request: Request) -> str:
     return _generate_session_id()
 
 
+def _attach_chat_session_id(request: Request) -> str:
+    """Resolve session once, set ``request.state.session_id`` for access logs and early ``log_event`` lines."""
+    existing = getattr(request.state, "session_id", None)
+    if existing is not None:
+        return existing
+    sid = _resolve_session_id(request)
+    request.state.session_id = sid
+    return sid
+
+
 def _resolve_conversation_id(request: Request, payload: ChatRequest) -> str | None:
     """Prefer ``X-Conversation-Id`` when set (3–128 chars); otherwise JSON ``conversation_id``."""
     header_raw = (request.headers.get("x-conversation-id") or "").strip()
@@ -100,9 +110,10 @@ def _build_orchestrator_request(payload: ChatRequest, request: Request) -> Orche
     # Correlation IDs are minted/propagated by request-context middleware.
     request_id = request.state.request_id
     trace_id = request.state.trace_id
-    # Session continuity: header ``X-Session-Id`` first, then body, then gateway-owned.
-    session_id = _resolve_session_id(request)
-    request.state.session_id = session_id
+    session_id = getattr(request.state, "session_id", None)
+    if session_id is None:
+        session_id = _resolve_session_id(request)
+        request.state.session_id = session_id
     return OrchestratorChatRequest(
         auth=AuthContext(**auth_context),
         context=OrchestratorContext(
@@ -143,12 +154,14 @@ def _build_call_context(
 @router.post("/chat", response_model=ChatResponse, response_model_exclude_none=True)
 async def chat(request: Request, payload: ChatRequest):
     request.state.access_log_stream = False
+    _attach_chat_session_id(request)
     # Record ingress event with correlation fields before processing.
     log_event(
         "request_received",
         path="/api/chat",
         request_id=request.state.request_id,
         trace_id=request.state.trace_id,
+        session_id=request.state.session_id,
     )
     payload = _normalize_request(payload, request)
     # Validation checkpoint for request observability.
@@ -157,6 +170,7 @@ async def chat(request: Request, payload: ChatRequest):
         path="/api/chat",
         request_id=request.state.request_id,
         trace_id=request.state.trace_id,
+        session_id=request.state.session_id,
     )
     orchestrator_payload = _build_orchestrator_request(payload, request)
 
