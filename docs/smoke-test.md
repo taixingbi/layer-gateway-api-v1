@@ -54,7 +54,7 @@ curl -N -sS -X POST "http://192.168.86.179:30185/api/chat" \
   -H "Content-Type: application/json" \
   -H "X-Session-Id: smoke-sess-002" \
   -d '{
-    "message": "Stream one short line",
+    "message": "Hello from smoke test",
     "stream": true,
     "metadata": { "user_agent": "curl-smoke" }
   }'

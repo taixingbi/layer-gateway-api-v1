@@ -1,3 +1,5 @@
+import json
+
 from fastapi.testclient import TestClient
 
 from app.main import create_app
@@ -129,3 +131,33 @@ def test_chat_streaming_via_json_body_stream_flag():
         assert "event: meta" in body
         assert "event: token" in body
         assert "event: done" in body
+
+
+class StubOrchestratorContextErrorInStream:
+    async def chat(self, *args, **kwargs):
+        raise NotImplementedError
+
+    async def stream_chat(self, *args, **kwargs):
+        yield 'event: token\ndata: {"text":"partial answer"}\n\n'
+        bad = (
+            "Error: ValueError: <Token var=<ContextVar name='pipeline_phase' at 0x0> "
+            "at 0x0> was created in a different Context"
+        )
+        yield f"event: token\ndata: {json.dumps({'text': bad})}\n\n"
+
+
+def test_chat_stream_rewrites_contextvar_poison_token_to_sse_error():
+    app = create_app()
+    with TestClient(app) as client:
+        app.state.orchestrator_client = StubOrchestratorContextErrorInStream()
+        response = client.post(
+            "/api/chat",
+            headers=_auth_headers(),
+            json={"message": "x", "stream": True, "metadata": {}},
+        )
+        assert response.status_code == 200
+        body = response.text
+        assert "event: error" in body
+        assert "upstream_internal" in body
+        assert 'data: {"status":"error"}' in body
+        assert "different Context" not in body

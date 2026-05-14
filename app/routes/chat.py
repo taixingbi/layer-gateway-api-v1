@@ -3,7 +3,7 @@ import time
 from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 
 from app.core.config import get_settings
 from app.core.logging import log_event
@@ -17,6 +17,32 @@ from app.schemas.orchestrator import (
     OrchestratorInput,
 )
 from app.services.orchestrator_call_context import OrchestratorCallContext
+
+def _gateway_sse_chunk_token_text(chunk: str) -> str | None:
+    """Parse ``event: token`` / ``data: {...}`` frame produced by ``OrchestratorClient``."""
+    for line in chunk.splitlines():
+        if line.startswith("data:"):
+            raw = line[5:].strip()
+            try:
+                obj = json.loads(raw)
+            except json.JSONDecodeError:
+                return raw
+            if isinstance(obj, dict):
+                return str(obj.get("text") or obj.get("token") or "")
+            return str(obj)
+    return None
+
+
+def _upstream_token_text_is_internal_context_error(text: str) -> bool:
+    """Detect orchestrator bug where ContextVar misuse is stringified into stream text."""
+    if not text:
+        return False
+    if "ContextVar" in text and "different Context" in text:
+        return True
+    if "pipeline_phase" in text and "Token" in text and "ContextVar" in text:
+        return True
+    return False
+
 
 router = APIRouter(prefix="/api", tags=["chat"])
 
@@ -130,7 +156,7 @@ async def chat(request: Request, payload: ChatRequest):
         ctx = _build_call_context(request, orchestrator_payload, stream=False)
         result = await client.chat(orchestrator_payload, ctx)
         log_event("orchestrator_call_succeeded", request_id=request.state.request_id, trace_id=request.state.trace_id)
-        return ChatResponse(
+        body = ChatResponse(
             status="success",
             session_id=orchestrator_payload.context.session_id,
             request_id=request.state.request_id,
@@ -139,6 +165,7 @@ async def chat(request: Request, payload: ChatRequest):
             citations=result.citations,
             usage=Usage(**result.usage) if result.usage else Usage(),
         )
+        return JSONResponse(content=body.model_dump(mode="json", exclude_none=True))
     except HTTPException as exc:
         # Keep mapped HTTP semantics while logging failure context.
         log_event("orchestrator_call_failed", request_id=request.state.request_id, trace_id=request.state.trace_id, status_code=exc.status_code)
@@ -162,15 +189,31 @@ async def _stream_response(request: Request, orchestrator_payload: OrchestratorC
     ctx = _build_call_context(request, orchestrator_payload, stream=True)
     upstream_first = True
     ttfb_start = time.perf_counter()
+    stream_failed = False
     try:
         # Forward normalized token events from orchestrator stream.
         async for token_event in client.stream_chat(orchestrator_payload, ctx):
             if upstream_first:
                 request.state.stream_ttfb_ms = (time.perf_counter() - ttfb_start) * 1000
                 upstream_first = False
+            token_text = _gateway_sse_chunk_token_text(token_event)
+            if token_text and _upstream_token_text_is_internal_context_error(token_text):
+                stream_failed = True
+                err = {
+                    "status": "error",
+                    "error": {
+                        "code": "upstream_internal",
+                        "message": "Upstream streaming failed (async context). Fix orchestrator ContextVar usage.",
+                    },
+                }
+                yield f"event: error\ndata: {json.dumps(err)}\n\n"
+                break
             yield token_event
-        # Mark stream completion with terminal success event.
-        yield "event: done\ndata: {\"status\":\"success\"}\n\n"
+        if stream_failed:
+            yield 'event: done\ndata: {"status":"error"}\n\n'
+        else:
+            # Mark stream completion with terminal success event.
+            yield "event: done\ndata: {\"status\":\"success\"}\n\n"
     except HTTPException as exc:
         # Convert mapped HTTP failures to stream-safe error envelope.
         payload = {"status": "error", "error": {"code": str(exc.status_code), "message": exc.detail}}
