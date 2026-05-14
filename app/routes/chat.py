@@ -100,7 +100,7 @@ def _build_call_context(
     )
 
 
-@router.post("/chat", response_model=ChatResponse)
+@router.post("/chat", response_model=ChatResponse, response_model_exclude_none=True)
 async def chat(request: Request, payload: ChatRequest):
     request.state.access_log_stream = False
     # Record ingress event with correlation fields before processing.
@@ -138,7 +138,6 @@ async def chat(request: Request, payload: ChatRequest):
             answer=result.answer,
             citations=result.citations,
             usage=Usage(**result.usage) if result.usage else Usage(),
-            error=None,
         )
     except HTTPException as exc:
         # Keep mapped HTTP semantics while logging failure context.

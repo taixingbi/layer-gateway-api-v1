@@ -44,7 +44,7 @@ curl -sS -X POST "http://192.168.86.179:30185/api/chat" \
   }' | jq .
 ```
 
-Expect `200`, `status: "success"`, and echoed `request_id` / `trace_id` / `session_id` in the body.
+Expect `200`, `status: "success"`, echoed `request_id` / `trace_id` / `session_id`, and no `error` key in the JSON body.
 
 **SSE stream** (`Accept: text/event-stream` or JSON `"stream": true`)
 

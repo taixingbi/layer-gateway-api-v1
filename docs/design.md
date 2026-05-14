@@ -67,7 +67,7 @@ Stable response:
 - `answer`
 - `citations`
 - `usage`
-- `error`
+- `error` (only on failure; omitted on success)
 
 Streaming events:
 - `meta`

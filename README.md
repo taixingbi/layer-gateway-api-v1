@@ -230,11 +230,11 @@ Success response:
   "usage": {
     "input_tokens": 120,
     "output_tokens": 240
-  },
-  "error": null
+  }
 }
 ```
 
+On success the **`error`** field is omitted (it appears only when present).
 ### Chat (SSE stream)
 
 Use either:

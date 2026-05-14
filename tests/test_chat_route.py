@@ -40,7 +40,7 @@ def test_chat_returns_stable_response_contract():
         assert data["request_id"].startswith("req_")
         assert data["trace_id"].startswith("trace_")
         assert data["session_id"].startswith("sess_")
-        assert "error" in data and data["error"] is None
+        assert "error" not in data
 
 
 def test_chat_uses_x_session_id_header_when_present():
