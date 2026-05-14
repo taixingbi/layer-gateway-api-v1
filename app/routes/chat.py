@@ -144,10 +144,20 @@ def _build_call_context(
 async def chat(request: Request, payload: ChatRequest):
     request.state.access_log_stream = False
     # Record ingress event with correlation fields before processing.
-    log_event("request_received", path="/api/chat", request_id=request.state.request_id, trace_id=request.state.trace_id)
+    log_event(
+        "request_received",
+        path="/api/chat",
+        request_id=request.state.request_id,
+        trace_id=request.state.trace_id,
+    )
     payload = _normalize_request(payload, request)
     # Validation checkpoint for request observability.
-    log_event("request_validated", request_id=request.state.request_id, trace_id=request.state.trace_id)
+    log_event(
+        "request_validated",
+        path="/api/chat",
+        request_id=request.state.request_id,
+        trace_id=request.state.trace_id,
+    )
     orchestrator_payload = _build_orchestrator_request(payload, request)
 
     # Streaming: `Accept: text/event-stream` or JSON `"stream": true` (query flags are not supported).

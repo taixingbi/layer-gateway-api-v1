@@ -62,6 +62,8 @@ class EasternJsonFormatter(jsonlogger.JsonFormatter):
 
 
 def configure_logging(env: str) -> None:
+    from app.core.config import get_settings
+
     handler = logging.StreamHandler(sys.stdout)
     formatter = EasternJsonFormatter()
     handler.setFormatter(formatter)
@@ -69,7 +71,11 @@ def configure_logging(env: str) -> None:
     logger.handlers = [handler]
     logger.setLevel(logging.INFO)
     logger.propagate = False
-    logger.info("logger_configured", extra=_base_log_extra("logger_configured", env=env))
+    settings = get_settings()
+    logger.info(
+        "logger_configured",
+        extra=_base_log_extra("logger_configured", env=env, service=settings.service_name),
+    )
 
 
 def get_logger() -> logging.Logger:
@@ -77,4 +83,9 @@ def get_logger() -> logging.Logger:
 
 
 def log_event(event: str, **fields: Any) -> None:
-    get_logger().info(event, extra=_base_log_extra(event, **fields))
+    merged: dict[str, Any] = dict(fields)
+    if "service" not in merged:
+        from app.core.config import get_settings
+
+        merged["service"] = get_settings().service_name
+    get_logger().info(event, extra=_base_log_extra(event, **merged))
