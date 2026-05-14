@@ -32,12 +32,14 @@ def _emit_request_complete(
 ) -> None:
     settings = get_settings()
     session_id = getattr(request.state, "session_id", None)
+    conversation_id = getattr(request.state, "conversation_id", None)
     fields = {
         "service": settings.service_name,
         # Effective correlation IDs (from X-Request-Id / X-Trace-Id when present, else minted).
         "request_id": getattr(request.state, "request_id", None),
         "trace_id": getattr(request.state, "trace_id", None),
         "session_id": session_id,
+        "conversation_id": conversation_id,
         "path": request.url.path,
         "method": request.method,
         "status": status_code,

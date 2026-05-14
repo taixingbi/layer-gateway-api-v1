@@ -1,4 +1,5 @@
 import json
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
@@ -97,6 +98,39 @@ def test_chat_rejects_session_id_in_json_body():
             json={"session_id": "sess-from-body", "message": "Hi", "metadata": {}},
         )
     assert response.status_code == 422
+
+
+def _kwargs_for_event(mock_log, event: str):
+    for call in mock_log.call_args_list:
+        if call.args and call.args[0] == event:
+            return call.kwargs
+    return None
+
+
+def test_chat_logs_and_request_complete_include_conversation_id_when_provided():
+    with patch("app.middleware.access_log.log_event") as access_mock, patch("app.routes.chat.log_event") as chat_mock:
+        app = create_app()
+        with TestClient(app) as client:
+            app.state.orchestrator_client = StubOrchestratorClient()
+            response = client.post(
+                "/api/chat",
+                headers=_auth_headers(),
+                json={"message": "Hi", "metadata": {}, "conversation_id": "conv-access-log-001"},
+            )
+        assert response.status_code == 200
+
+    rc = None
+    for call in access_mock.call_args_list:
+        if call.args and call.args[0] == "request_complete":
+            rc = call.kwargs
+            break
+    assert rc is not None
+    assert rc.get("conversation_id") == "conv-access-log-001"
+
+    for event in ("request_received", "request_validated", "orchestrator_call_started", "orchestrator_call_succeeded"):
+        fields = _kwargs_for_event(chat_mock, event)
+        assert fields is not None, event
+        assert fields.get("conversation_id") == "conv-access-log-001"
 
 
 def test_chat_passes_conversation_id_to_orchestrator_client_from_json_body():
@@ -211,13 +245,16 @@ def test_chat_streaming_contract():
         response = client.post(
             "/api/chat",
             headers={**_auth_headers(), "Accept": "text/event-stream"},
-            json={"message": "stream please"},
+            json={"message": "stream please", "conversation_id": "conv-sse-meta-001"},
         )
         assert response.status_code == 200
         body = response.text
         assert "event: meta" in body
         assert "event: token" in body
         assert "event: done" in body
+        meta_line = [ln for ln in body.splitlines() if ln.startswith("data:") and "request_id" in ln][0]
+        meta = json.loads(meta_line.split("data:", 1)[1].strip())
+        assert meta.get("conversation_id") == "conv-sse-meta-001"
 
 
 def test_chat_streaming_via_json_body_stream_flag():

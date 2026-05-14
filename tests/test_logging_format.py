@@ -32,6 +32,7 @@ def test_eastern_json_formatter_omits_asctime_levelname(formatter: EasternJsonFo
             "request_id": "req_demo_002",
             "trace_id": "trace_demo_002",
             "session_id": "sess_123",
+            "conversation_id": "conv_demo",
             "path": "/api/chat",
             "method": "POST",
             "status": 200,
@@ -46,7 +47,7 @@ def test_eastern_json_formatter_omits_asctime_levelname(formatter: EasternJsonFo
     assert "levelname" not in data
     assert data["message"] == "request_complete"
     assert data["event"] == "request_complete"
-    assert list(data.keys())[:12] == [
+    assert list(data.keys())[:13] == [
         "ts",
         "level",
         "message",
@@ -55,6 +56,7 @@ def test_eastern_json_formatter_omits_asctime_levelname(formatter: EasternJsonFo
         "request_id",
         "trace_id",
         "session_id",
+        "conversation_id",
         "path",
         "method",
         "status",

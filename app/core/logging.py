@@ -41,6 +41,7 @@ class EasternJsonFormatter(jsonlogger.JsonFormatter):
             "request_id",
             "trace_id",
             "session_id",
+            "conversation_id",
             "path",
             "method",
             "status",

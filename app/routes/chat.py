@@ -1,5 +1,6 @@
 import json
 import time
+from typing import Any
 from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException, Request
@@ -131,6 +132,19 @@ def _build_orchestrator_request(payload: ChatRequest, request: Request) -> Orche
     )
 
 
+def _chat_correlation_log_kwargs(request: Request) -> dict[str, Any]:
+    """Common correlation fields for chat route ``log_event`` lines (compact when no conversation)."""
+    out: dict[str, str] = {
+        "request_id": request.state.request_id,
+        "trace_id": request.state.trace_id,
+        "session_id": request.state.session_id,
+    }
+    cid = getattr(request.state, "conversation_id", None)
+    if cid:
+        out["conversation_id"] = cid
+    return out
+
+
 def _build_call_context(
     request: Request, orchestrator_payload: OrchestratorChatRequest, stream: bool
 ) -> OrchestratorCallContext:
@@ -155,14 +169,13 @@ def _build_call_context(
 async def chat(request: Request, payload: ChatRequest):
     request.state.access_log_stream = False
     _attach_chat_session_id(request)
+    request.state.conversation_id = _resolve_conversation_id(request, payload)
     # Record ingress event with correlation fields before processing.
     log_event(
         "request_received",
         path="/api/chat",
         method=request.method,
-        request_id=request.state.request_id,
-        trace_id=request.state.trace_id,
-        session_id=request.state.session_id,
+        **_chat_correlation_log_kwargs(request),
     )
     payload = _normalize_request(payload, request)
     # Validation checkpoint for request observability.
@@ -170,11 +183,10 @@ async def chat(request: Request, payload: ChatRequest):
         "request_validated",
         path="/api/chat",
         method=request.method,
-        request_id=request.state.request_id,
-        trace_id=request.state.trace_id,
-        session_id=request.state.session_id,
+        **_chat_correlation_log_kwargs(request),
     )
     orchestrator_payload = _build_orchestrator_request(payload, request)
+    request.state.conversation_id = orchestrator_payload.context.conversation_id
 
     # Streaming: `Accept: text/event-stream` or JSON `"stream": true` (query flags are not supported).
     accept = (request.headers.get("accept") or "").lower()
@@ -192,10 +204,10 @@ async def chat(request: Request, payload: ChatRequest):
 
     try:
         # Non-stream path performs single request/response orchestration call.
-        log_event("orchestrator_call_started", request_id=request.state.request_id, trace_id=request.state.trace_id)
+        log_event("orchestrator_call_started", **_chat_correlation_log_kwargs(request))
         ctx = _build_call_context(request, orchestrator_payload, stream=False)
         result = await client.chat(orchestrator_payload, ctx)
-        log_event("orchestrator_call_succeeded", request_id=request.state.request_id, trace_id=request.state.trace_id)
+        log_event("orchestrator_call_succeeded", **_chat_correlation_log_kwargs(request))
         body = ChatResponse(
             status="success",
             session_id=orchestrator_payload.context.session_id,
@@ -208,11 +220,11 @@ async def chat(request: Request, payload: ChatRequest):
         return JSONResponse(content=body.model_dump(mode="json", exclude_none=True))
     except HTTPException as exc:
         # Keep mapped HTTP semantics while logging failure context.
-        log_event("orchestrator_call_failed", request_id=request.state.request_id, trace_id=request.state.trace_id, status=exc.status_code)
+        log_event("orchestrator_call_failed", **_chat_correlation_log_kwargs(request), status=exc.status_code)
         raise
     except Exception as exc:  # pragma: no cover
         # Defensive fallback for unexpected gateway exceptions.
-        log_event("orchestrator_call_failed", request_id=request.state.request_id, trace_id=request.state.trace_id, error=str(exc))
+        log_event("orchestrator_call_failed", **_chat_correlation_log_kwargs(request), error=str(exc))
         raise HTTPException(status_code=500, detail="gateway failed") from exc
 
 
@@ -224,6 +236,8 @@ async def _stream_response(request: Request, orchestrator_payload: OrchestratorC
         "trace_id": request.state.trace_id,
         "session_id": orchestrator_payload.context.session_id,
     }
+    if orchestrator_payload.context.conversation_id:
+        meta["conversation_id"] = orchestrator_payload.context.conversation_id
     yield f"event: meta\ndata: {json.dumps(meta)}\n\n"
     client = request.app.state.orchestrator_client
     ctx = _build_call_context(request, orchestrator_payload, stream=True)
