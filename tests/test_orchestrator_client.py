@@ -287,6 +287,80 @@ async def test_flat_headers_stream_rag_events_aggregate_into_gateway_done():
 
 
 @pytest.mark.asyncio
+async def test_flat_headers_stream_orchestrator_rewrite_not_emitted_as_token():
+    """Orchestrator NDJSON ``type: rewrite`` must map to gateway ``rewrite`` event, not answer tokens."""
+    settings = Settings(
+        orchestrator_retry_max_attempts=1,
+        orchestrator_contract="flat_headers",
+        orchestrator_chat_path="/orchestrator/answer",
+    )
+    sse = (
+        b'data: {"type":"rewrite","text":"What is the candidate\'s visa status?"}\n\n'
+        b'data: {"type":"route","route":"rag"}\n\n'
+        b'data: {"type":"answer","text":"H4 EAD."}\n\n'
+        b'data: {"type":"done","request_id":"req-1"}\n\n'
+    )
+
+    json_body = {
+        "answer": "H4 EAD.",
+        "rewrite": "What is the candidate's visa status?",
+        "citations": [],
+        "follow_up_questions": [],
+        "usage": {},
+    }
+
+    async def handler(request: httpx.Request):
+        body = json.loads(request.content.decode())
+        if body.get("stream"):
+            return httpx.Response(200, content=sse, headers={"content-type": "text/event-stream"})
+        return httpx.Response(200, json=json_body)
+
+    transport = httpx.MockTransport(handler)
+    async with httpx.AsyncClient(base_url="http://test", transport=transport) as client:
+        orchestrator = OrchestratorClient(client=client, settings=settings)
+        chunks = [c async for c in orchestrator.stream_chat(_payload(), _ctx(stream=True))]
+
+    rewrite_chunks = [c for c in chunks if "event: rewrite" in c]
+    token_chunks = [c for c in chunks if "event: token" in c]
+    assert len(rewrite_chunks) == 1
+    assert "candidate" in rewrite_chunks[0]
+    assert len(token_chunks) == 1
+    assert "H4 EAD" in token_chunks[0]
+    assert "candidate" not in token_chunks[0]
+    done_chunk = next(c for c in chunks if c.lstrip().startswith("event: done"))
+    done_data = json.loads([ln for ln in done_chunk.splitlines() if ln.startswith("data:")][0][5:].strip())
+    assert done_data["rewrite"] == "What is the candidate's visa status?"
+
+
+@pytest.mark.asyncio
+async def test_chat_flat_non_stream_passes_rewrite():
+    settings = Settings(
+        orchestrator_retry_max_attempts=1,
+        orchestrator_contract="flat_headers",
+        orchestrator_chat_path="/orchestrator/answer",
+    )
+
+    async def handler(request: httpx.Request):
+        return httpx.Response(
+            200,
+            json={
+                "answer": "H4 EAD.",
+                "rewrite": "What is the candidate's visa status?",
+                "citations": [],
+                "follow_up_questions": [],
+                "usage": {},
+            },
+        )
+
+    transport = httpx.MockTransport(handler)
+    async with httpx.AsyncClient(base_url="http://test", transport=transport) as client:
+        orchestrator = OrchestratorClient(client=client, settings=settings)
+        result = await orchestrator.chat(_payload(), _ctx(stream=False))
+
+    assert result.rewrite == "What is the candidate's visa status?"
+
+
+@pytest.mark.asyncio
 async def test_flat_headers_stream_supplements_metadata_when_sse_lacks_citations():
     """Some upstreams stream tokens + empty ``done`` but return citations on non-stream JSON."""
     settings = Settings(

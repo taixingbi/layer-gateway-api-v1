@@ -435,18 +435,36 @@ class OrchestratorClient:
                     content_type=response.headers.get("content-type"),
                     note="stream_opened",
                 )
+                rewrite_acc: str | None = None
                 async for line in response.aiter_lines():
                     if not line:
                         continue
                     try:
                         parsed = json.loads(line)
-                        text = parsed.get("text") or parsed.get("token") or ""
                     except json.JSONDecodeError:
-                        text = line
+                        if line.strip():
+                            yield f"event: token\ndata: {json.dumps({'text': line})}\n\n"
+                        continue
+                    if not isinstance(parsed, dict):
+                        continue
+                    event_type = parsed.get("type")
+                    if isinstance(event_type, str):
+                        kind = event_type.lower()
+                        if kind == "rewrite":
+                            text = parsed.get("text")
+                            if isinstance(text, str) and text.strip():
+                                rewrite_acc = text.strip()
+                                yield _format_rewrite_sse_chunk(rewrite_acc)
+                            continue
+                        if kind in ("route", "request_id", "state", "done"):
+                            continue
+                    text = parsed.get("text") or parsed.get("token") or ""
                     if text:
                         yield f"event: token\ndata: {json.dumps({'text': text})}\n\n"
             result = await self._chat_gateway_json(payload, ctx)
             done_body = _done_body_from_orchestrator_result(result)
+            if rewrite_acc and not done_body.get("rewrite"):
+                done_body["rewrite"] = rewrite_acc
             _log_orchestrator_response(
                 settings=self._settings,
                 method="POST",
@@ -649,12 +667,42 @@ def _sse_items_from_payload(parsed: Any) -> list[Any]:
     return []
 
 
+def _orchestrator_sse_ndjson_type(raw: str) -> tuple[str | None, dict[str, Any] | None]:
+    """Parse orchestrator ``data: {"type": ...}`` NDJSON payloads."""
+    if not raw.strip():
+        return None, None
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        return None, None
+    if not isinstance(parsed, dict):
+        return None, None
+    event_type = parsed.get("type")
+    if isinstance(event_type, str):
+        return event_type.lower(), parsed
+    return None, parsed
+
+
+def _format_rewrite_sse_chunk(text: str) -> str:
+    return f"event: rewrite\ndata: {json.dumps({'text': text})}\n\n"
+
+
 def _token_text_from_sse_data(raw: str) -> str:
     if not raw.strip():
         return ""
     try:
         parsed = json.loads(raw)
         if isinstance(parsed, dict):
+            event_type = parsed.get("type")
+            if isinstance(event_type, str) and event_type.lower() in (
+                "rewrite",
+                "route",
+                "done",
+                "request_id",
+                "state",
+                "error",
+            ):
+                return ""
             text = parsed.get("text") or parsed.get("token")
             return str(text) if text else ""
         if isinstance(parsed, str):
@@ -666,6 +714,8 @@ def _token_text_from_sse_data(raw: str) -> str:
 
 def _done_body_from_orchestrator_result(result: OrchestratorChatResponse) -> dict[str, Any]:
     body: dict[str, Any] = {"status": "success"}
+    if result.rewrite:
+        body["rewrite"] = result.rewrite
     if result.citations:
         body["citations"] = result.citations
     if result.follow_up_questions:
@@ -733,9 +783,12 @@ def _gateway_done_payload(
     *,
     citations: list[dict[str, Any]],
     follow_up_questions: list[str],
+    rewrite: str | None = None,
 ) -> dict[str, Any]:
     """Build gateway ``done`` data, merging upstream terminal event with accumulated RAG fields."""
     body: dict[str, Any] = {"status": "success"}
+    if rewrite:
+        body["rewrite"] = rewrite
     if citations:
         body["citations"] = citations
     if follow_up_questions:
@@ -750,6 +803,9 @@ def _gateway_done_payload(
         return body
     if parsed.get("status"):
         body["status"] = parsed["status"]
+    upstream_rewrite = parsed.get("rewrite")
+    if isinstance(upstream_rewrite, str) and upstream_rewrite.strip():
+        body["rewrite"] = upstream_rewrite.strip()
     upstream_cites = parsed.get("citations")
     if isinstance(upstream_cites, list) and upstream_cites:
         body["citations"] = upstream_cites
@@ -764,6 +820,7 @@ async def _iter_upstream_sse_as_gateway_tokens(response: httpx.Response) -> Asyn
     block_lines: list[str] = []
     citations_acc: list[dict[str, Any]] = []
     follow_ups_acc: list[str] = []
+    rewrite_acc: str | None = None
     async for line in response.aiter_lines():
         if line.startswith(":"):
             continue
@@ -780,9 +837,42 @@ async def _iter_upstream_sse_as_gateway_tokens(response: httpx.Response) -> Asyn
             block_lines.clear()
             raw = "\n".join(data_lines)
 
+            ndjson_type, ndjson = _orchestrator_sse_ndjson_type(raw)
+            if ndjson_type == "rewrite":
+                text = ndjson.get("text") if ndjson else None
+                if isinstance(text, str) and text.strip():
+                    rewrite_acc = text.strip()
+                    yield _format_rewrite_sse_chunk(rewrite_acc)
+                continue
+            if ndjson_type in ("route", "request_id", "state"):
+                continue
+            if ndjson_type == "answer" and ndjson is not None:
+                text = ndjson.get("text")
+                if isinstance(text, str) and text:
+                    yield f"event: token\ndata: {json.dumps({'text': text})}\n\n"
+                for item in ndjson.get("citations") or []:
+                    if isinstance(item, dict):
+                        citations_acc.append(item)
+                for item in ndjson.get("follow_up_questions") or []:
+                    if isinstance(item, str) and item.strip():
+                        follow_ups_acc.append(item.strip())
+                continue
+            if ndjson_type == "done":
+                done_body = _gateway_done_payload(
+                    raw,
+                    citations=citations_acc,
+                    follow_up_questions=follow_ups_acc,
+                    rewrite=rewrite_acc,
+                )
+                yield _format_done_sse_chunk(done_body)
+                continue
+
             if event_name == "done":
                 done_body = _gateway_done_payload(
-                    raw, citations=citations_acc, follow_up_questions=follow_ups_acc
+                    raw,
+                    citations=citations_acc,
+                    follow_up_questions=follow_ups_acc,
+                    rewrite=rewrite_acc,
                 )
                 yield _format_done_sse_chunk(done_body)
                 continue

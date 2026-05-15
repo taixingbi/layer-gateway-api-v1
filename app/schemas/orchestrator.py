@@ -42,6 +42,7 @@ class OrchestratorChatResponse(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     answer: str
+    rewrite: str | None = None
     citations: list[dict[str, Any]] = Field(default_factory=list)
     follow_up_questions: list[str] = Field(default_factory=list)
     usage: dict[str, Any] = Field(default_factory=dict)

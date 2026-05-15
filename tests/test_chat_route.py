@@ -78,6 +78,37 @@ class StubOrchestratorWithFollowUps:
         yield 'event: token\ndata: {"text":"Hi"}\n\n'
 
 
+def test_chat_forwards_rewrite_from_upstream():
+    app = create_app()
+
+    class StubWithRewrite:
+        async def chat(self, payload, ctx=None):
+            return type(
+                "Resp",
+                (),
+                {
+                    "answer": "H4 EAD.",
+                    "rewrite": "What is the candidate's visa status?",
+                    "citations": [],
+                    "follow_up_questions": [],
+                    "usage": {},
+                },
+            )()
+
+        async def stream_chat(self, payload, ctx=None):
+            yield 'event: token\ndata: {"text":"x"}\n\n'
+
+    with TestClient(app) as client:
+        app.state.orchestrator_client = StubWithRewrite()
+        response = client.post(
+            "/api/chat",
+            headers=_auth_headers(),
+            json={"message": "visa?", "metadata": {}},
+        )
+        assert response.status_code == 200
+        assert response.json()["rewrite"] == "What is the candidate's visa status?"
+
+
 def test_chat_forwards_follow_up_questions_from_upstream():
     app = create_app()
     with TestClient(app) as client:

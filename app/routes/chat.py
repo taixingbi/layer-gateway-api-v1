@@ -228,6 +228,7 @@ async def chat(request: Request, payload: ChatRequest):
             request_id=request.state.request_id,
             trace_id=request.state.trace_id,
             answer=result.answer,
+            rewrite=getattr(result, "rewrite", None),
             citations=result.citations,
             follow_up_questions=getattr(result, "follow_up_questions", None) or [],
             usage=Usage(**result.usage) if result.usage else Usage(),

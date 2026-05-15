@@ -22,6 +22,7 @@ class ChatResponse(BaseModel):
     request_id: str
     trace_id: str
     answer: str
+    rewrite: str | None = None
     citations: list[dict[str, Any]] = Field(default_factory=list)
     follow_up_questions: list[str] = Field(default_factory=list)
     usage: Usage = Field(default_factory=Usage)

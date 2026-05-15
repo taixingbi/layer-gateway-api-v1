@@ -74,6 +74,7 @@ Example:
 | `request_id` | string | Yes | From `X-Request-Id` or gateway-minted |
 | `trace_id` | string | Yes | From `X-Trace-Id` or gateway-minted |
 | `answer` | string | Yes | Assistant text |
+| `rewrite` | string | No | Intent-router rewritten question; omitted when absent |
 | `citations` | array | Yes | Default `[]`; see [Citation object](#citation-object) |
 | `follow_up_questions` | array of string | Yes | Default `[]` |
 | `usage` | object | Yes | Token usage |
@@ -136,6 +137,14 @@ Emitted first by the gateway (correlation for the client).
 | `session_id` | string | |
 | `conversation_id` | string | Present when resolved |
 
+### `event: rewrite`
+
+Intent-router rewritten question (emitted before answer tokens when upstream provides it).
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `text` | string | Rewritten question |
+
 ### `event: token`
 
 Incremental answer text.
@@ -151,6 +160,7 @@ Terminal success (metadata may be filled from upstream SSE and/or a supplemental
 | Field | Type | Description |
 |-------|------|-------------|
 | `status` | string | `"success"` |
+| `rewrite` | string | Optional; same as `event: rewrite` when not emitted earlier |
 | `citations` | array | Optional; [Citation object](#citation-object) |
 | `follow_up_questions` | array of string | Optional |
 
