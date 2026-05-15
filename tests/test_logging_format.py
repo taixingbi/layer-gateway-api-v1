@@ -56,28 +56,35 @@ def test_eastern_json_formatter_standard_shape(formatter: EasternJsonFormatter) 
     assert list(data.keys())[: len(prefix)] == prefix
 
 
-def test_log_event_emits_pattern(capsys) -> None:
+def test_log_event_orchestrator_api_request_shape(capsys) -> None:
     from app.core.logging import configure_logging, log_event
 
     configure_logging("test")
     log_event(
-        "orchestrator_http_request",
-        request_id="req_1",
-        session_id="sess_1",
-        conversation_id="conv_1",
-        path="/v1/chat",
+        "orchestrator_api_request",
+        logger="layer_gateway.orchestrator_http",
+        phase="orchestrator_upstream",
+        message="orchestrator_api_request",
         method="POST",
-        stream=False,
-        backend="orchestrator",
+        path="/orchestrator/answer",
+        status="-",
+        request_id="req_demo_001",
+        session_id="sess_123",
+        conversation_id="conv_456",
+        gateway_meta={
+            "url": "http://orchestrator:8080/orchestrator/answer",
+            "orchestrator_api_request": {"question": "Hi", "conversation_id": "conv_456"},
+            "orchestrator_api_request_headers": {"X-Request-Id": "req_demo_001"},
+        },
+        omit_service=True,
     )
     line = capsys.readouterr().out.strip().splitlines()[-1]
     data = json.loads(line)
-    assert data["ts"]
-    assert data["level"] == "INFO"
-    assert data["logger"] == GATEWAY_LOGGER_NAME
-    assert data["phase"] == "upstream"
-    assert data["event"] == "orchestrator_http_request"
-    assert data["message"] == "Orchestrator HTTP request"
-    assert data["request_id"] == "req_1"
-    assert data["session_id"] == "sess_1"
-    assert data["conversation_id"] == "conv_1"
+    assert data["logger"] == "layer_gateway.orchestrator_http"
+    assert data["phase"] == "orchestrator_upstream"
+    assert data["event"] == "orchestrator_api_request"
+    assert data["message"] == "orchestrator_api_request"
+    assert data["status"] == "-"
+    assert "service" not in data
+    meta = data["gateway_meta"]
+    assert meta["orchestrator_api_request"]["question"] == "Hi"

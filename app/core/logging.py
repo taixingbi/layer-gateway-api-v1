@@ -25,6 +25,7 @@ LOG_FIELD_PRIORITY: tuple[str, ...] = (
     "path",
     "method",
     "status",
+    "gateway_meta",
     "latency_ms",
     "ttfb_ms",
     "stream",
@@ -40,6 +41,8 @@ _EVENT_PHASE: dict[str, str] = {
     "orchestrator_call_failed": "upstream",
     "orchestrator_http_request": "upstream",
     "orchestrator_http_response": "upstream",
+    "orchestrator_api_request": "orchestrator_upstream",
+    "orchestrator_api_response": "orchestrator_upstream",
     "stream_metadata_supplement_failed": "upstream",
     "logger_configured": "system",
 }
@@ -53,6 +56,8 @@ _EVENT_MESSAGE: dict[str, str] = {
     "orchestrator_call_failed": "Orchestrator call failed",
     "orchestrator_http_request": "Orchestrator HTTP request",
     "orchestrator_http_response": "Orchestrator HTTP response",
+    "orchestrator_api_request": "orchestrator_api_request",
+    "orchestrator_api_response": "orchestrator_api_response",
     "stream_metadata_supplement_failed": "Stream metadata supplement failed",
     "logger_configured": "Logger configured",
 }
@@ -80,14 +85,16 @@ def _base_log_extra(
     level: str = "INFO",
     phase: str | None = None,
     message: str | None = None,
+    logger: str = GATEWAY_LOGGER_NAME,
+    ts: str | None = None,
     **fields: Any,
 ) -> dict[str, Any]:
     # ``message`` is reserved on ``LogRecord``; emit human text as ``log_message`` and
     # promote to ``message`` in ``EasternJsonFormatter``.
     return {
-        "ts": eastern_from_timestamp(time.time()),
+        "ts": ts or eastern_from_timestamp(time.time()),
         "level": level.upper(),
-        "logger": GATEWAY_LOGGER_NAME,
+        "logger": logger,
         "phase": phase or _phase_for_event(event),
         "event": event,
         "log_message": message or _message_for_event(event),
@@ -158,9 +165,20 @@ def log_event(event: str, **fields: Any) -> None:
     level = str(merged.pop("level", "INFO")).upper()
     phase = merged.pop("phase", None)
     message = merged.pop("message", None)
-    if "service" not in merged:
+    logger_name = str(merged.pop("logger", GATEWAY_LOGGER_NAME))
+    ts = merged.pop("ts", None)
+    omit_service = bool(merged.pop("omit_service", False))
+    if not omit_service and "service" not in merged:
         from app.core.config import get_settings
 
         merged["service"] = get_settings().service_name
-    extra = _base_log_extra(event, level=level, phase=phase, message=message, **merged)
+    extra = _base_log_extra(
+        event,
+        level=level,
+        phase=phase,
+        message=message,
+        logger=logger_name,
+        ts=ts,
+        **merged,
+    )
     get_logger().log(_LEVEL_NUM.get(level, logging.INFO), event, extra=extra)

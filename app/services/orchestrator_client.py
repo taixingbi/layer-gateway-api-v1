@@ -1,4 +1,5 @@
 import json
+import time
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from typing import Any
 
@@ -7,10 +8,15 @@ from fastapi import HTTPException, status
 
 from app.core.config import Settings
 from app.core.logging import log_event
+from app.core.time_util import eastern_from_timestamp
 from app.schemas.orchestrator import OrchestratorChatRequest, OrchestratorChatResponse
 from app.services.orchestrator_call_context import OrchestratorCallContext
 
 _ORCH_LOG_BODY_MAX_CHARS = 8000
+ORCHESTRATOR_HTTP_LOGGER = "layer_gateway.orchestrator_http"
+ORCHESTRATOR_HTTP_PHASE = "orchestrator_upstream"
+ORCHESTRATOR_API_REQUEST_EVENT = "orchestrator_api_request"
+ORCHESTRATOR_API_RESPONSE_EVENT = "orchestrator_api_response"
 
 
 def _orch_correlation_fields(ctx: OrchestratorCallContext | None) -> dict[str, str]:
@@ -52,6 +58,14 @@ def _response_body_for_log(response: httpx.Response) -> Any:
     return {"_truncated": True, "preview": text[:_ORCH_LOG_BODY_MAX_CHARS]}
 
 
+def _orchestrator_url(settings: Settings, path: str) -> str:
+    return f"{settings.orchestrator_base_url.rstrip('/')}{path}"
+
+
+def _orchestrator_log_ts() -> str:
+    return eastern_from_timestamp(time.time(), timespec="microseconds")
+
+
 def _log_orchestrator_request(
     *,
     settings: Settings,
@@ -61,24 +75,37 @@ def _log_orchestrator_request(
     stream: bool,
     headers: dict[str, str] | None = None,
     body: Any = None,
+    attempt: int | None = None,
     note: str | None = None,
 ) -> None:
-    fields: dict[str, Any] = {
-        "backend": "orchestrator",
-        "orchestrator_base_url": settings.orchestrator_base_url,
+    gateway_meta: dict[str, Any] = {
+        "url": _orchestrator_url(settings, path),
         "orchestrator_contract": settings.orchestrator_contract,
-        "method": method,
-        "path": path,
-        "stream": stream,
-        **_orch_correlation_fields(ctx),
     }
-    if headers:
-        fields["request_headers"] = headers
     if body is not None:
-        fields["request_body"] = _payload_for_log(body)
+        gateway_meta["orchestrator_api_request"] = _payload_for_log(body)
+    if headers:
+        gateway_meta["orchestrator_api_request_headers"] = dict(headers)
+    if stream:
+        gateway_meta["stream"] = True
+    if attempt is not None:
+        gateway_meta["orchestrator_http_attempt"] = attempt
     if note:
-        fields["note"] = note
-    log_event("orchestrator_http_request", **fields)
+        gateway_meta["note"] = note
+
+    log_event(
+        ORCHESTRATOR_API_REQUEST_EVENT,
+        logger=ORCHESTRATOR_HTTP_LOGGER,
+        phase=ORCHESTRATOR_HTTP_PHASE,
+        message=ORCHESTRATOR_API_REQUEST_EVENT,
+        method=method,
+        path=path,
+        status="-",
+        gateway_meta=gateway_meta,
+        ts=_orchestrator_log_ts(),
+        omit_service=True,
+        **_orch_correlation_fields(ctx),
+    )
 
 
 def _log_orchestrator_response(
@@ -90,25 +117,46 @@ def _log_orchestrator_response(
     stream: bool,
     status_code: int,
     body: Any = None,
+    content_type: str | None = None,
+    attempt: int | None = None,
     note: str | None = None,
 ) -> None:
-    fields: dict[str, Any] = {
-        "backend": "orchestrator",
-        "orchestrator_base_url": settings.orchestrator_base_url,
+    gateway_meta: dict[str, Any] = {
+        "url": _orchestrator_url(settings, path),
+        "http_status_code": status_code,
         "orchestrator_contract": settings.orchestrator_contract,
-        "method": method,
-        "path": path,
-        "stream": stream,
-        "status": status_code,
-        **_orch_correlation_fields(ctx),
     }
+    if attempt is not None:
+        gateway_meta["orchestrator_http_attempts"] = attempt
+    if content_type:
+        gateway_meta["content_type"] = content_type
+    if stream:
+        gateway_meta["stream"] = True
     if body is not None:
-        fields["response_body"] = _payload_for_log(body) if not isinstance(body, str) else (
-            body if len(body) <= _ORCH_LOG_BODY_MAX_CHARS else {"_truncated": True, "preview": body[:_ORCH_LOG_BODY_MAX_CHARS]}
-        )
+        if isinstance(body, str):
+            gateway_meta["orchestrator_api_response"] = (
+                body
+                if len(body) <= _ORCH_LOG_BODY_MAX_CHARS
+                else {"_truncated": True, "preview": body[:_ORCH_LOG_BODY_MAX_CHARS]}
+            )
+        else:
+            gateway_meta["orchestrator_api_response"] = _payload_for_log(body)
     if note:
-        fields["note"] = note
-    log_event("orchestrator_http_response", **fields)
+        gateway_meta["note"] = note
+
+    log_event(
+        ORCHESTRATOR_API_RESPONSE_EVENT,
+        logger=ORCHESTRATOR_HTTP_LOGGER,
+        phase=ORCHESTRATOR_HTTP_PHASE,
+        message=ORCHESTRATOR_API_RESPONSE_EVENT,
+        method=method,
+        path=path,
+        status="-",
+        gateway_meta=gateway_meta,
+        ts=_orchestrator_log_ts(),
+        omit_service=True,
+        **_orch_correlation_fields(ctx),
+    )
 
 
 class OrchestratorClient:
@@ -161,7 +209,7 @@ class OrchestratorClient:
                     ctx=ctx,
                     stream=False,
                     body=body,
-                    note=f"attempt={attempt}",
+                    attempt=attempt,
                 )
                 response = await self._client.post(path, json=body)
                 if response.status_code == status.HTTP_400_BAD_REQUEST:
@@ -173,7 +221,8 @@ class OrchestratorClient:
                         stream=False,
                         status_code=response.status_code,
                         body=_response_body_for_log(response),
-                        note=f"attempt={attempt}",
+                        content_type=response.headers.get("content-type"),
+                        attempt=attempt,
                     )
                     raise HTTPException(status_code=400, detail="Invalid request for orchestrator")
                 if response.status_code in (status.HTTP_401_UNAUTHORIZED, status.HTTP_403_FORBIDDEN):
@@ -185,7 +234,8 @@ class OrchestratorClient:
                         stream=False,
                         status_code=response.status_code,
                         body=_response_body_for_log(response),
-                        note=f"attempt={attempt}",
+                        content_type=response.headers.get("content-type"),
+                        attempt=attempt,
                     )
                     raise HTTPException(status_code=response.status_code, detail="Upstream auth failure")
                 if response.status_code >= 500:
@@ -197,7 +247,8 @@ class OrchestratorClient:
                         stream=False,
                         status_code=response.status_code,
                         body=_response_body_for_log(response),
-                        note=f"attempt={attempt}",
+                        content_type=response.headers.get("content-type"),
+                        attempt=attempt,
                     )
                     if attempt == self._settings.orchestrator_retry_max_attempts:
                         raise HTTPException(status_code=502, detail="Orchestrator upstream failure")
@@ -213,7 +264,8 @@ class OrchestratorClient:
                     stream=False,
                     status_code=response.status_code,
                     body=parsed,
-                    note=f"attempt={attempt}",
+                    content_type=response.headers.get("content-type"),
+                    attempt=attempt,
                 )
                 return OrchestratorChatResponse.model_validate(parsed)
             except httpx.TimeoutException as exc:
@@ -255,7 +307,7 @@ class OrchestratorClient:
                     stream=False,
                     headers=headers,
                     body=body,
-                    note=f"attempt={attempt}",
+                    attempt=attempt,
                 )
                 response = await self._client.post(path, headers=headers, json=body)
                 if response.status_code == status.HTTP_400_BAD_REQUEST:
@@ -267,7 +319,8 @@ class OrchestratorClient:
                         stream=False,
                         status_code=response.status_code,
                         body=_response_body_for_log(response),
-                        note=f"attempt={attempt}",
+                        content_type=response.headers.get("content-type"),
+                        attempt=attempt,
                     )
                     raise HTTPException(status_code=400, detail="Invalid request for orchestrator")
                 if response.status_code in (status.HTTP_401_UNAUTHORIZED, status.HTTP_403_FORBIDDEN):
@@ -279,7 +332,8 @@ class OrchestratorClient:
                         stream=False,
                         status_code=response.status_code,
                         body=_response_body_for_log(response),
-                        note=f"attempt={attempt}",
+                        content_type=response.headers.get("content-type"),
+                        attempt=attempt,
                     )
                     raise HTTPException(status_code=response.status_code, detail="Upstream auth failure")
                 if response.status_code >= 500:
@@ -291,7 +345,8 @@ class OrchestratorClient:
                         stream=False,
                         status_code=response.status_code,
                         body=_response_body_for_log(response),
-                        note=f"attempt={attempt}",
+                        content_type=response.headers.get("content-type"),
+                        attempt=attempt,
                     )
                     if attempt == self._settings.orchestrator_retry_max_attempts:
                         raise HTTPException(status_code=502, detail="Orchestrator upstream failure")
@@ -307,7 +362,8 @@ class OrchestratorClient:
                     stream=False,
                     status_code=response.status_code,
                     body=parsed,
-                    note=f"attempt={attempt}",
+                    content_type=response.headers.get("content-type"),
+                    attempt=attempt,
                 )
                 return OrchestratorChatResponse.model_validate(parsed)
             except httpx.TimeoutException as exc:
@@ -364,6 +420,7 @@ class OrchestratorClient:
                         stream=True,
                         status_code=response.status_code,
                         body=_response_body_for_log(response),
+                        content_type=response.headers.get("content-type"),
                         note="stream_failed",
                     )
                     raise HTTPException(status_code=502, detail="Orchestrator stream failed")
@@ -374,7 +431,8 @@ class OrchestratorClient:
                     ctx=ctx,
                     stream=True,
                     status_code=response.status_code,
-                    body={"streaming": True, "content_type": response.headers.get("content-type")},
+                    body={"streaming": True},
+                    content_type=response.headers.get("content-type"),
                     note="stream_opened",
                 )
                 async for line in response.aiter_lines():
@@ -445,6 +503,7 @@ class OrchestratorClient:
                         stream=True,
                         status_code=response.status_code,
                         body=_response_body_for_log(response),
+                        content_type=response.headers.get("content-type"),
                         note="stream_failed",
                     )
                     raise HTTPException(status_code=502, detail="Orchestrator stream failed")
@@ -455,7 +514,8 @@ class OrchestratorClient:
                     ctx=flat_ctx,
                     stream=True,
                     status_code=response.status_code,
-                    body={"streaming": True, "content_type": response.headers.get("content-type")},
+                    body={"streaming": True},
+                    content_type=response.headers.get("content-type"),
                     note="stream_opened",
                 )
                 chunks: list[str] = []
@@ -546,6 +606,7 @@ class OrchestratorClient:
                 ctx=None,
                 stream=False,
                 status_code=response.status_code,
+                content_type=response.headers.get("content-type"),
                 body=None,
             )
             return response.status_code, None
@@ -558,6 +619,7 @@ class OrchestratorClient:
                 ctx=None,
                 stream=False,
                 status_code=response.status_code,
+                content_type=response.headers.get("content-type"),
                 body=parsed,
             )
             return response.status_code, parsed
@@ -570,6 +632,7 @@ class OrchestratorClient:
                 ctx=None,
                 stream=False,
                 status_code=response.status_code,
+                content_type=response.headers.get("content-type"),
                 body=raw,
             )
             return response.status_code, None
