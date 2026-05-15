@@ -25,6 +25,7 @@ class CapturingOrchestratorStub:
             {
                 "answer": "ok",
                 "citations": [],
+                "follow_up_questions": [],
                 "usage": {"input_tokens": 1, "output_tokens": 2},
             },
         )()
@@ -43,6 +44,7 @@ class StubOrchestratorClient:
             {
                 "answer": "You can return items within 30 days.",
                 "citations": [],
+                "follow_up_questions": [],
                 "usage": {"input_tokens": 10, "output_tokens": 20},
             },
         )()
@@ -54,6 +56,43 @@ class StubOrchestratorClient:
 
 def _auth_headers():
     return {"Authorization": "Bearer token-123"}
+
+
+class StubOrchestratorWithFollowUps:
+    async def chat(self, payload, ctx=None):
+        return type(
+            "Resp",
+            (),
+            {
+                "answer": "H4 EAD.",
+                "citations": [{"cite_id": 1, "text": "visa"}],
+                "follow_up_questions": [
+                    "Can you explain H4 EAD?",
+                    "Does renewal apply?",
+                ],
+                "usage": {"input_tokens": 0, "output_tokens": 0},
+            },
+        )()
+
+    async def stream_chat(self, payload, ctx=None):
+        yield 'event: token\ndata: {"text":"Hi"}\n\n'
+
+
+def test_chat_forwards_follow_up_questions_from_upstream():
+    app = create_app()
+    with TestClient(app) as client:
+        app.state.orchestrator_client = StubOrchestratorWithFollowUps()
+        response = client.post(
+            "/api/chat",
+            headers=_auth_headers(),
+            json={"message": "visa status?", "metadata": {}},
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["follow_up_questions"] == [
+            "Can you explain H4 EAD?",
+            "Does renewal apply?",
+        ]
 
 
 def test_chat_returns_stable_response_contract():
@@ -236,6 +275,44 @@ def test_chat_validation_rejects_blank_message():
             json={"message": "   "},
         )
         assert response.status_code == 400
+
+
+class EnrichedDoneStreamStub:
+    """Simulates orchestrator client output after RAG SSE aggregation."""
+
+    async def chat(self, *args, **kwargs):
+        raise NotImplementedError
+
+    async def stream_chat(self, *args, **kwargs):
+        done = json.dumps(
+            {
+                "status": "success",
+                "citations": [{"cite_id": 1, "source": "personal_profile", "text": "H4 EAD"}],
+                "follow_up_questions": ["What does H4 EAD mean?"],
+            }
+        )
+        yield 'event: meta\ndata: {"request_id":"req_x","trace_id":"trace_x","session_id":"sess_x"}\n\n'
+        yield 'event: token\ndata: {"text":"H4 EAD."}\n\n'
+        yield f"event: done\ndata: {done}\n\n"
+
+
+def test_chat_stream_preserves_citations_and_follow_ups_on_done():
+    app = create_app()
+    with TestClient(app) as client:
+        app.state.orchestrator_client = EnrichedDoneStreamStub()
+        response = client.post(
+            "/api/chat",
+            headers={**_auth_headers(), "Accept": "text/event-stream"},
+            json={"message": "visa?", "stream": True, "metadata": {}},
+        )
+        assert response.status_code == 200
+        body = response.text
+        assert "event: done" in body
+        done_line = next(ln for ln in body.splitlines() if ln.startswith("data:") and "follow_up_questions" in ln)
+        payload = json.loads(done_line.split("data:", 1)[1].strip())
+        assert payload["status"] == "success"
+        assert len(payload["citations"]) == 1
+        assert payload["follow_up_questions"] == ["What does H4 EAD mean?"]
 
 
 def test_chat_streaming_contract():

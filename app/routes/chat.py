@@ -215,6 +215,7 @@ async def chat(request: Request, payload: ChatRequest):
             trace_id=request.state.trace_id,
             answer=result.answer,
             citations=result.citations,
+            follow_up_questions=getattr(result, "follow_up_questions", None) or [],
             usage=Usage(**result.usage) if result.usage else Usage(),
         )
         return JSONResponse(content=body.model_dump(mode="json", exclude_none=True))
@@ -244,12 +245,17 @@ async def _stream_response(request: Request, orchestrator_payload: OrchestratorC
     upstream_first = True
     ttfb_start = time.perf_counter()
     stream_failed = False
+    upstream_done_sent = False
     try:
         # Forward normalized token events from orchestrator stream.
         async for token_event in client.stream_chat(orchestrator_payload, ctx):
             if upstream_first:
                 request.state.stream_ttfb_ms = (time.perf_counter() - ttfb_start) * 1000
                 upstream_first = False
+            if token_event.lstrip().startswith("event: done"):
+                upstream_done_sent = True
+                yield token_event
+                continue
             token_text = _gateway_sse_chunk_token_text(token_event)
             if token_text and _upstream_token_text_is_internal_context_error(token_text):
                 stream_failed = True
@@ -265,7 +271,7 @@ async def _stream_response(request: Request, orchestrator_payload: OrchestratorC
             yield token_event
         if stream_failed:
             yield 'event: done\ndata: {"status":"error"}\n\n'
-        else:
+        elif not upstream_done_sent:
             # Mark stream completion with terminal success event.
             yield "event: done\ndata: {\"status\":\"success\"}\n\n"
     except HTTPException as exc:

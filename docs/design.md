@@ -66,13 +66,14 @@ Stable response:
 - `trace_id`
 - `answer`
 - `citations`
+- `follow_up_questions` (from orchestrator / RAG when present)
 - `usage`
 - `error` (only on failure; omitted on success)
 
 Streaming events:
 - `meta`
-- `token`
-- `done`
+- `token` (from upstream `answer_delta` / `token`)
+- `done` — `data` includes `status`, and when upstream RAG sent them: `citations`, `follow_up_questions` (aggregated from separate upstream SSE events)
 - `error`
 
 ## Runtime Modules

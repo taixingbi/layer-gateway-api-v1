@@ -153,3 +153,80 @@ async def test_flat_headers_stream_parses_sse_tokens():
 
     assert _token_text(chunks[0]) == "Hello"
     assert _token_text(chunks[1]) == " world"
+
+
+@pytest.mark.asyncio
+async def test_flat_headers_stream_forwards_upstream_done_event():
+    settings = Settings(
+        orchestrator_retry_max_attempts=1,
+        orchestrator_contract="flat_headers",
+        orchestrator_chat_path="/orchestrator/answer",
+    )
+    done_payload = json.dumps(
+        {
+            "status": "success",
+            "follow_up_questions": ["Q1?", "Q2?"],
+            "citations": [{"cite_id": 1}],
+        }
+    )
+    sse = (
+        b'event: token\ndata: {"text":"Hi"}\n\n'
+        + f"event: done\ndata: {done_payload}\n\n".encode()
+    )
+
+    async def handler(request: httpx.Request):
+        return httpx.Response(200, content=sse, headers={"content-type": "text/event-stream"})
+
+    transport = httpx.MockTransport(handler)
+    async with httpx.AsyncClient(base_url="http://test", transport=transport) as client:
+        orchestrator = OrchestratorClient(client=client, settings=settings)
+        chunks = [c async for c in orchestrator.stream_chat(_payload(), _ctx(stream=True))]
+
+    assert any(c.lstrip().startswith("event: done") for c in chunks)
+    done_chunk = next(c for c in chunks if c.lstrip().startswith("event: done"))
+    assert "follow_up_questions" in done_chunk
+    assert "Q1?" in done_chunk
+
+
+@pytest.mark.asyncio
+async def test_flat_headers_stream_rag_events_aggregate_into_gateway_done():
+    """RAG ``/v1/rag/query`` stream: citations / follow_up_questions on separate events; ``done`` is often empty."""
+    settings = Settings(
+        orchestrator_retry_max_attempts=1,
+        orchestrator_contract="flat_headers",
+        orchestrator_chat_path="/v1/rag/query",
+    )
+    cite = {
+        "cite_id": 1,
+        "chunk_id": "1607b45e-1c07-5c29-975d-bbf47ef3129c",
+        "source": "personal_profile",
+        "text": "H4 EAD",
+    }
+    sse = (
+        b'event: meta\ndata: {"request_id":"req-1"}\n\n'
+        b'event: answer_delta\ndata: {"text":"Hello "}\n\n'
+        b'event: answer_delta\ndata: {"text":"world"}\n\n'
+        b"event: citations\ndata: "
+        + json.dumps({"items": [cite]}).encode()
+        + b"\n\n"
+        b"event: follow_up_questions\ndata: "
+        + json.dumps({"items": ["Q1?", "Q2?"]}).encode()
+        + b"\n\n"
+        b"event: done\ndata: {}\n\n"
+    )
+
+    async def handler(request: httpx.Request):
+        return httpx.Response(200, content=sse, headers={"content-type": "text/event-stream"})
+
+    transport = httpx.MockTransport(handler)
+    async with httpx.AsyncClient(base_url="http://test", transport=transport) as client:
+        orchestrator = OrchestratorClient(client=client, settings=settings)
+        chunks = [c async for c in orchestrator.stream_chat(_payload(), _ctx(stream=True))]
+
+    token_chunks = [c for c in chunks if "event: token" in c]
+    assert len(token_chunks) == 2
+    done_chunk = next(c for c in chunks if c.lstrip().startswith("event: done"))
+    done_data = json.loads([ln for ln in done_chunk.splitlines() if ln.startswith("data:")][0][5:].strip())
+    assert done_data["status"] == "success"
+    assert done_data["citations"] == [cite]
+    assert done_data["follow_up_questions"] == ["Q1?", "Q2?"]

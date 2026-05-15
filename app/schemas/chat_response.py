@@ -23,5 +23,6 @@ class ChatResponse(BaseModel):
     trace_id: str
     answer: str
     citations: list[dict[str, Any]] = Field(default_factory=list)
+    follow_up_questions: list[str] = Field(default_factory=list)
     usage: Usage = Field(default_factory=Usage)
     error: ErrorDetails | None = None

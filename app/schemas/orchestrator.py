@@ -40,4 +40,5 @@ class OrchestratorChatResponse(BaseModel):
 
     answer: str
     citations: list[dict[str, Any]] = Field(default_factory=list)
+    follow_up_questions: list[str] = Field(default_factory=list)
     usage: dict[str, Any] = Field(default_factory=dict)

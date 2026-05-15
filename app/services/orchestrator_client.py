@@ -208,28 +208,115 @@ class OrchestratorClient:
             return response.status_code, None
 
 
+def _sse_items_from_payload(parsed: Any) -> list[Any]:
+    """RAG/orchestrator often wraps lists in ``{"items": [...]}``."""
+    if isinstance(parsed, list):
+        return parsed
+    if isinstance(parsed, dict):
+        items = parsed.get("items")
+        if isinstance(items, list):
+            return items
+    return []
+
+
+def _token_text_from_sse_data(raw: str) -> str:
+    if not raw.strip():
+        return ""
+    try:
+        parsed = json.loads(raw)
+        if isinstance(parsed, dict):
+            text = parsed.get("text") or parsed.get("token")
+            return str(text) if text else ""
+        if isinstance(parsed, str):
+            return parsed
+    except json.JSONDecodeError:
+        return raw
+    return ""
+
+
+def _gateway_done_payload(
+    raw: str,
+    *,
+    citations: list[dict[str, Any]],
+    follow_up_questions: list[str],
+) -> dict[str, Any]:
+    """Build gateway ``done`` data, merging upstream terminal event with accumulated RAG fields."""
+    body: dict[str, Any] = {"status": "success"}
+    if citations:
+        body["citations"] = citations
+    if follow_up_questions:
+        body["follow_up_questions"] = follow_up_questions
+    if not raw.strip():
+        return body
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        return body
+    if not isinstance(parsed, dict):
+        return body
+    if parsed.get("status"):
+        body["status"] = parsed["status"]
+    upstream_cites = parsed.get("citations")
+    if isinstance(upstream_cites, list) and upstream_cites:
+        body["citations"] = upstream_cites
+    upstream_follow = parsed.get("follow_up_questions")
+    if isinstance(upstream_follow, list) and upstream_follow:
+        body["follow_up_questions"] = [str(q) for q in upstream_follow if q]
+    return body
+
+
 async def _iter_upstream_sse_as_gateway_tokens(response: httpx.Response) -> AsyncGenerator[str, None]:
-    """Parse upstream SSE and emit gateway `event: token` frames."""
-    data_lines: list[str] = []
+    """Map upstream RAG SSE (``answer_delta``, ``citations``, ``follow_up_questions``, ``done``) to gateway contract."""
+    block_lines: list[str] = []
+    citations_acc: list[dict[str, Any]] = []
+    follow_ups_acc: list[str] = []
     async for line in response.aiter_lines():
         if line.startswith(":"):
             continue
         if line == "":
-            if not data_lines:
+            if not block_lines:
                 continue
+            event_name = "message"
+            data_lines: list[str] = []
+            for bl in block_lines:
+                if bl.startswith("event:"):
+                    event_name = bl[6:].strip().lower()
+                elif bl.startswith("data:"):
+                    data_lines.append(bl[5:].lstrip())
+            block_lines.clear()
             raw = "\n".join(data_lines)
-            data_lines.clear()
-            text = ""
-            try:
-                parsed = json.loads(raw)
-                if isinstance(parsed, dict):
-                    text = str(parsed.get("text") or parsed.get("token") or "")
-                elif isinstance(parsed, str):
-                    text = parsed
-            except json.JSONDecodeError:
-                text = raw
-            if text:
-                yield f"event: token\ndata: {json.dumps({'text': text})}\n\n"
+
+            if event_name == "done":
+                done_body = _gateway_done_payload(
+                    raw, citations=citations_acc, follow_up_questions=follow_ups_acc
+                )
+                yield f"event: done\ndata: {json.dumps(done_body)}\n\n"
+                continue
+
+            if event_name == "citations":
+                try:
+                    parsed = json.loads(raw) if raw.strip() else {}
+                    for item in _sse_items_from_payload(parsed):
+                        if isinstance(item, dict):
+                            citations_acc.append(item)
+                except json.JSONDecodeError:
+                    pass
+                continue
+
+            if event_name == "follow_up_questions":
+                try:
+                    parsed = json.loads(raw) if raw.strip() else {}
+                    for item in _sse_items_from_payload(parsed):
+                        if isinstance(item, str) and item.strip():
+                            follow_ups_acc.append(item.strip())
+                except json.JSONDecodeError:
+                    pass
+                continue
+
+            # ``answer_delta``, ``token``, or bare ``data: {"text":...}`` lines
+            if event_name in ("answer_delta", "token", "message", ""):
+                text = _token_text_from_sse_data(raw)
+                if text:
+                    yield f"event: token\ndata: {json.dumps({'text': text})}\n\n"
             continue
-        if line.startswith("data:"):
-            data_lines.append(line[5:].lstrip())
+        block_lines.append(line)

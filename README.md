@@ -230,6 +230,10 @@ Success response:
   "trace_id": "trace_xyz789",
   "answer": "You can return items within 30 days...",
   "citations": [],
+  "follow_up_questions": [
+    "What is the return window for opened items?",
+    "Do sale items qualify for returns?"
+  ],
   "usage": {
     "input_tokens": 120,
     "output_tokens": 240
@@ -281,8 +285,10 @@ event: token
 data: {"text":" world"}
 
 event: done
-data: {"status":"success"}
+data: {"status":"success","citations":[{"cite_id":1,"source":"profile","text":"..."}],"follow_up_questions":["Follow-up question 1?"]}
 ```
+
+With `ORCHESTRATOR_CONTRACT=flat_headers`, the gateway aggregates upstream RAG events (`citations`, `follow_up_questions`) into the terminal `done` payload when upstream sends them on separate SSE lines before `done`.
 
 ## Observability and limits
 
