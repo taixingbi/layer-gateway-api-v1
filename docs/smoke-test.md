@@ -42,6 +42,22 @@ curl -sS -X POST "http://192.168.86.179:30185/api/chat" \
     "message": "Hello from smoke test",
     "metadata": { "page": "/smoke", "user_agent": "curl" }
   }' | jq .
+
+**Non-stream with history** (forwarded to orchestrator on `flat_headers` / `input.history` on `gateway_json`)
+
+```bash
+curl -sS -X POST "http://192.168.86.179:30185/api/chat" \
+  -H "Authorization: Bearer demo-token" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "message": "what is Taixing US visa status?",
+    "conversation_id": "conv-smoke-1",
+    "history": [
+      {"role": "user", "content": "What is Taixing Bi US visa status?"},
+      {"role": "assistant", "content": "Taixing has H4 EAD and does not need sponsorship."}
+    ]
+  }' | jq .
+```
 ```
 
 Expect `200`, `status: "success"`, echoed `request_id` / `trace_id` / `session_id`, and no `error` key in the JSON body.

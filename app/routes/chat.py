@@ -9,6 +9,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from app.core.config import get_settings
 from app.core.logging import log_event
 from app.schemas.chat_request import ChatRequest
+from app.schemas.history import ChatHistoryMessage
 from app.schemas.chat_response import ChatResponse, ErrorDetails, Usage
 from app.schemas.orchestrator import (
     AuthContext,
@@ -101,6 +102,19 @@ def _normalize_request(payload: ChatRequest, request: Request) -> ChatRequest:
     # Persist normalized values used by orchestrator payload builder.
     payload.message = message
     payload.metadata = payload.metadata or {}
+    if payload.history:
+        normalized: list[ChatHistoryMessage] = []
+        for turn in payload.history:
+            content = turn.content.strip()
+            if not content:
+                raise HTTPException(status_code=400, detail="history entry content cannot be empty")
+            if len(content) > max_len:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"history entry exceeds max length ({max_len})",
+                )
+            normalized.append(ChatHistoryMessage(role=turn.role, content=content))
+        payload.history = normalized
     return payload
 
 
@@ -123,7 +137,7 @@ def _build_orchestrator_request(payload: ChatRequest, request: Request) -> Orche
             request_id=request_id,
             trace_id=trace_id,
         ),
-        input=OrchestratorInput(question=payload.message),
+        input=OrchestratorInput(question=payload.message, history=payload.history),
         client=OrchestratorClientInfo(
             source="nextjs-web",
             page=payload.metadata.get("page"),

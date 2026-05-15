@@ -2,6 +2,8 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.schemas.history import ChatHistoryMessage
+
 
 class AuthContext(BaseModel):
     user_id: str
@@ -18,6 +20,7 @@ class OrchestratorContext(BaseModel):
 
 class OrchestratorInput(BaseModel):
     question: str
+    history: list[ChatHistoryMessage] = Field(default_factory=list, max_length=100)
 
 
 class OrchestratorClientInfo(BaseModel):

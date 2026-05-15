@@ -37,11 +37,15 @@ Outermost first on the incoming request:
 4. **Inflight limit** — bounded concurrency; **503** when over cap (health/ready/metrics/docs exempt).
 
 ## API Contracts
+
+Field-level request/response tables: **[schema.md](./schema.md)**.
+
 ### Frontend -> Gateway (`POST /api/chat`)
 Request:
 - `X-Session-Id` header (optional): session continuity; if omitted the gateway mints `sess_…` (never accept `session_id` in JSON — `extra=forbid`).
 - `conversation_id` (optional)
 - `message` (required)
+- `history` (optional array of `{role, content}` prior turns; forwarded to orchestrator)
 - `client_timestamp` (optional)
 - `metadata` (optional object)
 
@@ -55,7 +59,7 @@ Headers:
 Body sections:
 - `auth`: `user_id`, `tenant_id`, `roles`
 - `context`: `session_id`, `conversation_id`, `request_id`, `trace_id`
-- `input`: normalized `question`
+- `input`: normalized `question` and optional `history`
 - `client`: source and metadata
 
 ### Gateway -> Frontend

@@ -172,6 +172,30 @@ def test_chat_logs_and_request_complete_include_conversation_id_when_provided():
         assert fields.get("conversation_id") == "conv-access-log-001"
 
 
+def test_chat_passes_history_to_orchestrator_client():
+    app = create_app()
+    stub = CapturingOrchestratorStub()
+    history = [
+        {"role": "user", "content": "What is Taixing Bi US visa status?"},
+        {"role": "assistant", "content": "Taixing has H4 EAD and does not need sponsorship."},
+    ]
+    with TestClient(app) as client:
+        app.state.orchestrator_client = stub
+        response = client.post(
+            "/api/chat",
+            headers=_auth_headers(),
+            json={
+                "message": "what is Taixing US visa status?",
+                "conversation_id": "conv-smoke-1",
+                "metadata": {},
+                "history": history,
+            },
+        )
+        assert response.status_code == 200
+    assert stub.chat_payload.input.question == "what is Taixing US visa status?"
+    assert [h.model_dump() for h in stub.chat_payload.input.history] == history
+
+
 def test_chat_passes_conversation_id_to_orchestrator_client_from_json_body():
     app = create_app()
     stub = CapturingOrchestratorStub()

@@ -1,13 +1,114 @@
 import json
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Awaitable, Callable
 from typing import Any
 
 import httpx
 from fastapi import HTTPException, status
 
 from app.core.config import Settings
+from app.core.logging import log_event
 from app.schemas.orchestrator import OrchestratorChatRequest, OrchestratorChatResponse
 from app.services.orchestrator_call_context import OrchestratorCallContext
+
+_ORCH_LOG_BODY_MAX_CHARS = 8000
+
+
+def _orch_correlation_fields(ctx: OrchestratorCallContext | None) -> dict[str, str]:
+    if ctx is None:
+        return {}
+    out: dict[str, str] = {
+        "request_id": ctx.request_id,
+        "trace_id": ctx.trace_id,
+        "session_id": ctx.session_id,
+    }
+    if ctx.conversation_id:
+        out["conversation_id"] = ctx.conversation_id
+    return out
+
+
+def _payload_for_log(payload: Any) -> Any:
+    """JSON-serialize for logs; truncate very large bodies."""
+    if payload is None:
+        return None
+    try:
+        text = json.dumps(payload, default=str)
+    except (TypeError, ValueError):
+        text = str(payload)
+    if len(text) <= _ORCH_LOG_BODY_MAX_CHARS:
+        return payload
+    return {"_truncated": True, "preview": text[:_ORCH_LOG_BODY_MAX_CHARS]}
+
+
+def _response_body_for_log(response: httpx.Response) -> Any:
+    ct = (response.headers.get("content-type") or "").lower()
+    if "application/json" in ct:
+        try:
+            return _payload_for_log(response.json())
+        except json.JSONDecodeError:
+            pass
+    text = response.text
+    if len(text) <= _ORCH_LOG_BODY_MAX_CHARS:
+        return text
+    return {"_truncated": True, "preview": text[:_ORCH_LOG_BODY_MAX_CHARS]}
+
+
+def _log_orchestrator_request(
+    *,
+    settings: Settings,
+    method: str,
+    path: str,
+    ctx: OrchestratorCallContext | None,
+    stream: bool,
+    headers: dict[str, str] | None = None,
+    body: Any = None,
+    note: str | None = None,
+) -> None:
+    fields: dict[str, Any] = {
+        "backend": "orchestrator",
+        "orchestrator_base_url": settings.orchestrator_base_url,
+        "orchestrator_contract": settings.orchestrator_contract,
+        "method": method,
+        "path": path,
+        "stream": stream,
+        **_orch_correlation_fields(ctx),
+    }
+    if headers:
+        fields["request_headers"] = headers
+    if body is not None:
+        fields["request_body"] = _payload_for_log(body)
+    if note:
+        fields["note"] = note
+    log_event("orchestrator_http_request", **fields)
+
+
+def _log_orchestrator_response(
+    *,
+    settings: Settings,
+    method: str,
+    path: str,
+    ctx: OrchestratorCallContext | None,
+    stream: bool,
+    status_code: int,
+    body: Any = None,
+    note: str | None = None,
+) -> None:
+    fields: dict[str, Any] = {
+        "backend": "orchestrator",
+        "orchestrator_base_url": settings.orchestrator_base_url,
+        "orchestrator_contract": settings.orchestrator_contract,
+        "method": method,
+        "path": path,
+        "stream": stream,
+        "status": status_code,
+        **_orch_correlation_fields(ctx),
+    }
+    if body is not None:
+        fields["response_body"] = _payload_for_log(body) if not isinstance(body, str) else (
+            body if len(body) <= _ORCH_LOG_BODY_MAX_CHARS else {"_truncated": True, "preview": body[:_ORCH_LOG_BODY_MAX_CHARS]}
+        )
+    if note:
+        fields["note"] = note
+    log_event("orchestrator_http_response", **fields)
 
 
 class OrchestratorClient:
@@ -35,33 +136,86 @@ class OrchestratorClient:
         body: dict[str, Any] = {"question": payload.input.question, "stream": ctx.stream}
         if ctx.conversation_id:
             body["conversation_id"] = ctx.conversation_id
+        if payload.input.history:
+            body["history"] = [turn.model_dump() for turn in payload.input.history]
         return body
 
     async def chat(self, payload: OrchestratorChatRequest, ctx: OrchestratorCallContext) -> OrchestratorChatResponse:
         """Send non-stream chat requests with bounded retries and mapped errors."""
         if self._settings.orchestrator_contract == "flat_headers":
             return await self._chat_flat(payload, ctx)
-        return await self._chat_gateway_json(payload)
+        return await self._chat_gateway_json(payload, ctx)
 
-    async def _chat_gateway_json(self, payload: OrchestratorChatRequest) -> OrchestratorChatResponse:
+    async def _chat_gateway_json(
+        self, payload: OrchestratorChatRequest, ctx: OrchestratorCallContext | None = None
+    ) -> OrchestratorChatResponse:
+        path = self._settings.orchestrator_chat_path
+        body = payload.model_dump()
         last_error: Exception | None = None
         for attempt in range(1, self._settings.orchestrator_retry_max_attempts + 1):
             try:
-                response = await self._client.post(
-                    self._settings.orchestrator_chat_path,
-                    json=payload.model_dump(),
+                _log_orchestrator_request(
+                    settings=self._settings,
+                    method="POST",
+                    path=path,
+                    ctx=ctx,
+                    stream=False,
+                    body=body,
+                    note=f"attempt={attempt}",
                 )
+                response = await self._client.post(path, json=body)
                 if response.status_code == status.HTTP_400_BAD_REQUEST:
+                    _log_orchestrator_response(
+                        settings=self._settings,
+                        method="POST",
+                        path=path,
+                        ctx=ctx,
+                        stream=False,
+                        status_code=response.status_code,
+                        body=_response_body_for_log(response),
+                        note=f"attempt={attempt}",
+                    )
                     raise HTTPException(status_code=400, detail="Invalid request for orchestrator")
                 if response.status_code in (status.HTTP_401_UNAUTHORIZED, status.HTTP_403_FORBIDDEN):
+                    _log_orchestrator_response(
+                        settings=self._settings,
+                        method="POST",
+                        path=path,
+                        ctx=ctx,
+                        stream=False,
+                        status_code=response.status_code,
+                        body=_response_body_for_log(response),
+                        note=f"attempt={attempt}",
+                    )
                     raise HTTPException(status_code=response.status_code, detail="Upstream auth failure")
                 if response.status_code >= 500:
+                    _log_orchestrator_response(
+                        settings=self._settings,
+                        method="POST",
+                        path=path,
+                        ctx=ctx,
+                        stream=False,
+                        status_code=response.status_code,
+                        body=_response_body_for_log(response),
+                        note=f"attempt={attempt}",
+                    )
                     if attempt == self._settings.orchestrator_retry_max_attempts:
                         raise HTTPException(status_code=502, detail="Orchestrator upstream failure")
                     continue
 
                 response.raise_for_status()
-                return OrchestratorChatResponse.model_validate(response.json())
+                parsed = response.json()
+                _log_orchestrator_response(
+                    settings=self._settings,
+                    method="POST",
+                    path=path,
+                    ctx=ctx,
+                    stream=False,
+                    status_code=response.status_code,
+                    body=parsed,
+                    note=f"attempt={attempt}",
+                )
+                return OrchestratorChatResponse.model_validate(parsed)
             except httpx.TimeoutException as exc:
                 last_error = exc
                 if attempt == self._settings.orchestrator_retry_max_attempts:
@@ -87,25 +241,75 @@ class OrchestratorClient:
             stream=False,
             conversation_id=ctx.conversation_id,
         )
+        path = self._settings.orchestrator_chat_path
+        headers = self._flat_headers(flat_ctx)
+        body = self._flat_json_body(payload, flat_ctx)
         last_error: Exception | None = None
         for attempt in range(1, self._settings.orchestrator_retry_max_attempts + 1):
             try:
-                response = await self._client.post(
-                    self._settings.orchestrator_chat_path,
-                    headers=self._flat_headers(flat_ctx),
-                    json=self._flat_json_body(payload, flat_ctx),
+                _log_orchestrator_request(
+                    settings=self._settings,
+                    method="POST",
+                    path=path,
+                    ctx=flat_ctx,
+                    stream=False,
+                    headers=headers,
+                    body=body,
+                    note=f"attempt={attempt}",
                 )
+                response = await self._client.post(path, headers=headers, json=body)
                 if response.status_code == status.HTTP_400_BAD_REQUEST:
+                    _log_orchestrator_response(
+                        settings=self._settings,
+                        method="POST",
+                        path=path,
+                        ctx=flat_ctx,
+                        stream=False,
+                        status_code=response.status_code,
+                        body=_response_body_for_log(response),
+                        note=f"attempt={attempt}",
+                    )
                     raise HTTPException(status_code=400, detail="Invalid request for orchestrator")
                 if response.status_code in (status.HTTP_401_UNAUTHORIZED, status.HTTP_403_FORBIDDEN):
+                    _log_orchestrator_response(
+                        settings=self._settings,
+                        method="POST",
+                        path=path,
+                        ctx=flat_ctx,
+                        stream=False,
+                        status_code=response.status_code,
+                        body=_response_body_for_log(response),
+                        note=f"attempt={attempt}",
+                    )
                     raise HTTPException(status_code=response.status_code, detail="Upstream auth failure")
                 if response.status_code >= 500:
+                    _log_orchestrator_response(
+                        settings=self._settings,
+                        method="POST",
+                        path=path,
+                        ctx=flat_ctx,
+                        stream=False,
+                        status_code=response.status_code,
+                        body=_response_body_for_log(response),
+                        note=f"attempt={attempt}",
+                    )
                     if attempt == self._settings.orchestrator_retry_max_attempts:
                         raise HTTPException(status_code=502, detail="Orchestrator upstream failure")
                     continue
 
                 response.raise_for_status()
-                return OrchestratorChatResponse.model_validate(response.json())
+                parsed = response.json()
+                _log_orchestrator_response(
+                    settings=self._settings,
+                    method="POST",
+                    path=path,
+                    ctx=flat_ctx,
+                    stream=False,
+                    status_code=response.status_code,
+                    body=parsed,
+                    note=f"attempt={attempt}",
+                )
+                return OrchestratorChatResponse.model_validate(parsed)
             except httpx.TimeoutException as exc:
                 last_error = exc
                 if attempt == self._settings.orchestrator_retry_max_attempts:
@@ -127,18 +331,52 @@ class OrchestratorClient:
             async for ev in self._stream_chat_flat(payload, ctx):
                 yield ev
             return
-        async for ev in self._stream_chat_gateway_json(payload):
+        async for ev in self._stream_chat_gateway_json(payload, ctx):
             yield ev
 
-    async def _stream_chat_gateway_json(self, payload: OrchestratorChatRequest) -> AsyncGenerator[str, None]:
+    async def _stream_chat_gateway_json(
+        self, payload: OrchestratorChatRequest, ctx: OrchestratorCallContext
+    ) -> AsyncGenerator[str, None]:
+        path = self._settings.orchestrator_chat_path
+        body = payload.model_dump()
         try:
+            _log_orchestrator_request(
+                settings=self._settings,
+                method="POST",
+                path=path,
+                ctx=ctx,
+                stream=True,
+                headers={"Accept": "text/event-stream"},
+                body=body,
+            )
             async with self._client.stream(
                 "POST",
-                self._settings.orchestrator_chat_path,
-                json=payload.model_dump(),
+                path,
+                headers={"Accept": "text/event-stream"},
+                json=body,
             ) as response:
                 if response.status_code >= 400:
+                    _log_orchestrator_response(
+                        settings=self._settings,
+                        method="POST",
+                        path=path,
+                        ctx=ctx,
+                        stream=True,
+                        status_code=response.status_code,
+                        body=_response_body_for_log(response),
+                        note="stream_failed",
+                    )
                     raise HTTPException(status_code=502, detail="Orchestrator stream failed")
+                _log_orchestrator_response(
+                    settings=self._settings,
+                    method="POST",
+                    path=path,
+                    ctx=ctx,
+                    stream=True,
+                    status_code=response.status_code,
+                    body={"streaming": True, "content_type": response.headers.get("content-type")},
+                    note="stream_opened",
+                )
                 async for line in response.aiter_lines():
                     if not line:
                         continue
@@ -149,6 +387,19 @@ class OrchestratorClient:
                         text = line
                     if text:
                         yield f"event: token\ndata: {json.dumps({'text': text})}\n\n"
+            result = await self._chat_gateway_json(payload, ctx)
+            done_body = _done_body_from_orchestrator_result(result)
+            _log_orchestrator_response(
+                settings=self._settings,
+                method="POST",
+                path=path,
+                ctx=ctx,
+                stream=True,
+                status_code=200,
+                body=done_body,
+                note="stream_metadata_supplement",
+            )
+            yield _format_done_sse_chunk(done_body)
         except httpx.TimeoutException as exc:
             raise HTTPException(status_code=504, detail="Orchestrator stream timeout") from exc
 
@@ -166,20 +417,98 @@ class OrchestratorClient:
             stream=True,
             conversation_id=ctx.conversation_id,
         )
+        path = self._settings.orchestrator_chat_path
+        headers = {**self._flat_headers(flat_ctx), "Accept": "text/event-stream"}
+        body = self._flat_json_body(payload, flat_ctx)
         try:
-            headers = {**self._flat_headers(flat_ctx), "Accept": "text/event-stream"}
+            _log_orchestrator_request(
+                settings=self._settings,
+                method="POST",
+                path=path,
+                ctx=flat_ctx,
+                stream=True,
+                headers=headers,
+                body=body,
+            )
             async with self._client.stream(
                 "POST",
-                self._settings.orchestrator_chat_path,
+                path,
                 headers=headers,
-                json=self._flat_json_body(payload, flat_ctx),
+                json=body,
             ) as response:
                 if response.status_code >= 400:
+                    _log_orchestrator_response(
+                        settings=self._settings,
+                        method="POST",
+                        path=path,
+                        ctx=flat_ctx,
+                        stream=True,
+                        status_code=response.status_code,
+                        body=_response_body_for_log(response),
+                        note="stream_failed",
+                    )
                     raise HTTPException(status_code=502, detail="Orchestrator stream failed")
+                _log_orchestrator_response(
+                    settings=self._settings,
+                    method="POST",
+                    path=path,
+                    ctx=flat_ctx,
+                    stream=True,
+                    status_code=response.status_code,
+                    body={"streaming": True, "content_type": response.headers.get("content-type")},
+                    note="stream_opened",
+                )
+                chunks: list[str] = []
                 async for token_chunk in _iter_upstream_sse_as_gateway_tokens(response):
+                    chunks.append(token_chunk)
+                supplement = self._flat_stream_metadata_supplement(payload, flat_ctx)
+                chunks = await _enrich_stream_done_chunks(chunks, supplement)
+                done_summary = None
+                for chunk in chunks:
+                    if chunk.lstrip().startswith("event: done"):
+                        done_summary = _parse_done_sse_chunk(chunk)
+                _log_orchestrator_response(
+                    settings=self._settings,
+                    method="POST",
+                    path=path,
+                    ctx=flat_ctx,
+                    stream=True,
+                    status_code=response.status_code,
+                    body={"gateway_chunk_count": len(chunks), "done": done_summary},
+                    note="stream_closed",
+                )
+                for token_chunk in chunks:
                     yield token_chunk
         except httpx.TimeoutException as exc:
             raise HTTPException(status_code=504, detail="Orchestrator stream timeout") from exc
+
+    def _flat_stream_metadata_supplement(
+        self, payload: OrchestratorChatRequest, stream_ctx: OrchestratorCallContext
+    ) -> Callable[[], Awaitable[tuple[list[dict[str, Any]], list[str]]]]:
+        """When upstream SSE omits ``citations`` / ``follow_up_questions``, fetch them via non-stream JSON."""
+
+        async def _fetch() -> tuple[list[dict[str, Any]], list[str]]:
+            non_stream_ctx = OrchestratorCallContext(
+                session_id=stream_ctx.session_id,
+                request_id=stream_ctx.request_id,
+                trace_id=stream_ctx.trace_id,
+                user_id=stream_ctx.user_id,
+                roles=stream_ctx.roles,
+                groups=stream_ctx.groups,
+                teams=stream_ctx.teams,
+                stream=False,
+                conversation_id=stream_ctx.conversation_id,
+            )
+            result = await self._chat_flat(payload, non_stream_ctx)
+            cites = [c for c in (result.citations or []) if isinstance(c, dict)]
+            follow_ups = [
+                str(q).strip()
+                for q in (result.follow_up_questions or [])
+                if isinstance(q, str) and str(q).strip()
+            ]
+            return cites, follow_ups
+
+        return _fetch
 
     async def readiness_check(self) -> tuple[bool, str | None]:
         """GET configured path on orchestrator base URL; used by gateway ``/ready``."""
@@ -199,12 +528,50 @@ class OrchestratorClient:
 
     async def post_feedback(self, body: dict[str, Any]) -> tuple[int, dict[str, Any] | list[Any] | None]:
         """POST feedback JSON to orchestrator; returns (status_code, parsed_json_or_none)."""
-        response = await self._client.post(self._settings.orchestrator_feedback_path, json=body)
+        path = self._settings.orchestrator_feedback_path
+        _log_orchestrator_request(
+            settings=self._settings,
+            method="POST",
+            path=path,
+            ctx=None,
+            stream=False,
+            body=body,
+        )
+        response = await self._client.post(path, json=body)
         if not response.content:
+            _log_orchestrator_response(
+                settings=self._settings,
+                method="POST",
+                path=path,
+                ctx=None,
+                stream=False,
+                status_code=response.status_code,
+                body=None,
+            )
             return response.status_code, None
         try:
-            return response.status_code, response.json()
+            parsed = response.json()
+            _log_orchestrator_response(
+                settings=self._settings,
+                method="POST",
+                path=path,
+                ctx=None,
+                stream=False,
+                status_code=response.status_code,
+                body=parsed,
+            )
+            return response.status_code, parsed
         except json.JSONDecodeError:
+            raw = response.text
+            _log_orchestrator_response(
+                settings=self._settings,
+                method="POST",
+                path=path,
+                ctx=None,
+                stream=False,
+                status_code=response.status_code,
+                body=raw,
+            )
             return response.status_code, None
 
 
@@ -232,6 +599,70 @@ def _token_text_from_sse_data(raw: str) -> str:
     except json.JSONDecodeError:
         return raw
     return ""
+
+
+def _done_body_from_orchestrator_result(result: OrchestratorChatResponse) -> dict[str, Any]:
+    body: dict[str, Any] = {"status": "success"}
+    if result.citations:
+        body["citations"] = result.citations
+    if result.follow_up_questions:
+        body["follow_up_questions"] = result.follow_up_questions
+    return body
+
+
+def _parse_done_sse_chunk(chunk: str) -> dict[str, Any] | None:
+    for line in chunk.splitlines():
+        if line.startswith("data:"):
+            raw = line[5:].strip()
+            if not raw:
+                return {"status": "success"}
+            try:
+                parsed = json.loads(raw)
+                return parsed if isinstance(parsed, dict) else {"status": "success"}
+            except json.JSONDecodeError:
+                return {"status": "success"}
+    return None
+
+
+def _format_done_sse_chunk(done_body: dict[str, Any]) -> str:
+    return f"event: done\ndata: {json.dumps(done_body)}\n\n"
+
+
+async def _enrich_stream_done_chunks(
+    chunks: list[str],
+    supplement: Callable[[], Awaitable[tuple[list[dict[str, Any]], list[str]]]] | None,
+) -> list[str]:
+    """Ensure terminal ``done`` includes citations / follow-ups (post-stream supplement when missing)."""
+    done_idx = -1
+    for i, chunk in enumerate(chunks):
+        if chunk.lstrip().startswith("event: done"):
+            done_idx = i
+    done_body: dict[str, Any] = {"status": "success"}
+    if done_idx >= 0:
+        parsed = _parse_done_sse_chunk(chunks[done_idx])
+        if parsed:
+            done_body = parsed
+    elif supplement is None:
+        return chunks
+
+    if not done_body.get("citations") and not done_body.get("follow_up_questions") and supplement is not None:
+        try:
+            s_cites, s_follows = await supplement()
+            if s_cites:
+                done_body["citations"] = s_cites
+            if s_follows:
+                done_body["follow_up_questions"] = s_follows
+        except HTTPException:
+            raise
+        except Exception as exc:
+            log_event("stream_metadata_supplement_failed", level="WARN", error=str(exc))
+
+    enriched = _format_done_sse_chunk(done_body)
+    if done_idx >= 0:
+        chunks[done_idx] = enriched
+    else:
+        chunks.append(enriched)
+    return chunks
 
 
 def _gateway_done_payload(
@@ -290,7 +721,7 @@ async def _iter_upstream_sse_as_gateway_tokens(response: httpx.Response) -> Asyn
                 done_body = _gateway_done_payload(
                     raw, citations=citations_acc, follow_up_questions=follow_ups_acc
                 )
-                yield f"event: done\ndata: {json.dumps(done_body)}\n\n"
+                yield _format_done_sse_chunk(done_body)
                 continue
 
             if event_name == "citations":

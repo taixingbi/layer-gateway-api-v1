@@ -288,7 +288,7 @@ event: done
 data: {"status":"success","citations":[{"cite_id":1,"source":"profile","text":"..."}],"follow_up_questions":["Follow-up question 1?"]}
 ```
 
-With `ORCHESTRATOR_CONTRACT=flat_headers`, the gateway aggregates upstream RAG events (`citations`, `follow_up_questions`) into the terminal `done` payload when upstream sends them on separate SSE lines before `done`.
+With `ORCHESTRATOR_CONTRACT=flat_headers`, the gateway aggregates upstream RAG events (`citations`, `follow_up_questions`) into the terminal `done` payload when upstream sends them on separate SSE lines before `done`. If the upstream stream only returns tokens and an empty `done` (but non-stream JSON includes citations / follow-ups), the gateway performs one supplemental non-stream upstream call at the end of the stream to fill `done` metadata.
 
 ## Observability and limits
 
