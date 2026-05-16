@@ -4,7 +4,7 @@ import httpx
 from fastapi import FastAPI
 
 from app.core.config import get_settings
-from app.core.logging import configure_logging
+from app.core.logging import configure_logging, log_event
 from app.middleware.access_log import StructuredAccessLogMiddleware
 from app.middleware.auth import AuthMiddleware
 from app.middleware.inflight import InflightLimitMiddleware
@@ -20,6 +20,11 @@ from app.services.orchestrator_client import OrchestratorClient
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings = get_settings()
+    log_event(
+        "startup_auth",
+        auth_mode=settings.auth_mode,
+        note="stub=dev_bearer_accepted; jwt=JWKS_verify",
+    )
     if settings.auth_mode == "jwt":
         app.state.jwt_validator = JwtValidator(settings)
     else:

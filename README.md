@@ -72,7 +72,10 @@ Copy the template and edit as needed:
 cp .env.example .env
 ```
 
-Defaults also live in [`app/core/config.py`](app/core/config.py). `.env.example` documents all variables, including `ORCHESTRATOR_CONTRACT` (`gateway_json` vs `flat_headers`), `AUTH_MODE` (`stub` vs `jwt`), stub auth fields for local dev, and JWT settings (`AUTH_JWT_*`) for production IdP verification.
+Defaults also live in [`app/core/config.py`](app/core/config.py). `.env.example` documents all variables, including `ORCHESTRATOR_CONTRACT` (`gateway_json` vs `flat_headers`), and auth:
+
+- **`AUTH_MODE=stub`** (default): local and smoke tests. Any non-empty `Authorization: Bearer` is accepted; trusted `user_id` / `tenant_id` / `roles` come from **`AUTH_STUB_*`**, not from the token string.
+- **`AUTH_MODE=jwt`**: production. The gateway verifies access tokens with **`AUTH_JWT_ISSUER`**, **`AUTH_JWT_AUDIENCE`**, and **`AUTH_JWT_JWKS_URL`** (see `.env.example`); trusted context is built from JWT claims (`AUTH_JWT_CLAIM_*`).
 
 Example fragment for a header-style orchestrator with **stub auth** (see `.env.example` for the full file):
 
