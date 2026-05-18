@@ -7,7 +7,11 @@ from pydantic import BaseModel, EmailStr, Field, field_validator
 
 from app.services.auth_claims import UserClaims
 from app.services.auth_roles import normalize_roles
-from app.services.supabase_client import get_supabase_admin_client, require_supabase
+from app.services.supabase_client import (
+    admin_client_configured,
+    get_supabase_admin_client,
+    require_supabase,
+)
 from app.services.time_util import format_iso_est
 from app.services.user_meta import meta_get, sync_jwt_metadata
 
@@ -120,6 +124,39 @@ def _handle_db_error(exc: Exception) -> None:
     raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
+def _email_from_username_rpc(username: str) -> str | None:
+    supabase = require_supabase()
+    try:
+        result = supabase.rpc("get_email_for_username", {"p_username": username}).execute()
+    except APIError as exc:
+        code = getattr(exc, "code", None) or ""
+        message = str(exc).lower()
+        if code == "PGRST202" or "get_email_for_username" in message:
+            return None
+        _handle_db_error(exc)
+    except Exception as exc:
+        _handle_db_error(exc)
+
+    data = result.data
+    if isinstance(data, str) and data.strip():
+        return data.strip()
+    return None
+
+
+def _email_from_username_admin(username: str) -> str | None:
+    admin = get_supabase_admin_client()
+    if not admin:
+        return None
+    try:
+        result = admin.table("profiles").select("email").eq("username", username).limit(1).execute()
+    except Exception as exc:
+        _handle_db_error(exc)
+    if not result.data:
+        return None
+    email = result.data[0].get("email")
+    return email.strip() if isinstance(email, str) and email.strip() else None
+
+
 def resolve_login_email(identifier: str) -> str:
     raw = identifier.strip()
     if not raw:
@@ -127,22 +164,20 @@ def resolve_login_email(identifier: str) -> str:
     if "@" in raw:
         return raw
 
-    admin = get_supabase_admin_client()
-    if not admin:
+    email = _email_from_username_admin(raw) or _email_from_username_rpc(raw)
+    if email:
+        return email
+
+    if not admin_client_configured():
         raise HTTPException(
             status_code=503,
-            detail="Username login requires SUPABASE_SERVICE_KEY in gateway .env",
+            detail=(
+                "Username login is not configured. Set SUPABASE_SERVICE_KEY to the service_role "
+                "secret (Supabase → Project Settings → API), or run sql/username_login.sql in the "
+                "SQL editor and retry."
+            ),
         )
-    try:
-        result = admin.table("profiles").select("email").eq("username", raw).limit(1).execute()
-    except Exception as exc:
-        _handle_db_error(exc)
-    if not result.data:
-        raise HTTPException(status_code=401, detail="Invalid login credentials")
-    email = result.data[0].get("email")
-    if not email:
-        raise HTTPException(status_code=401, detail="Invalid login credentials")
-    return email
+    raise HTTPException(status_code=401, detail="Invalid login credentials")
 
 
 def _profiles_table(access_token: str):

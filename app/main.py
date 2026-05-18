@@ -17,17 +17,29 @@ from app.routes.metrics import router as metrics_router
 from app.routes.profile import router as profile_router
 from app.services.jwt_validator import JwtValidator
 from app.services.orchestrator_client import OrchestratorClient
+from app.services.supabase_client import admin_client_configured, service_key_role
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings = get_settings()
+    role = service_key_role() if settings.supabase_enabled else None
     log_event(
         "startup_auth",
         supabase_enabled=settings.supabase_enabled,
         jwt_fallback=not settings.supabase_enabled,
+        supabase_admin_client=admin_client_configured(),
+        supabase_service_key_role=role,
         note="supabase=get_user+profiles; else JWKS_verify",
     )
+    if settings.supabase_enabled and role == "anon":
+        log_event(
+            "startup_auth_warn",
+            message=(
+                "SUPABASE_SERVICE_KEY looks like the anon key; username login may fail. "
+                "Use the service_role secret or run sql/username_login.sql."
+            ),
+        )
     if settings.supabase_enabled:
         app.state.jwt_validator = None
     else:

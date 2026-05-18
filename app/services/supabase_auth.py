@@ -141,17 +141,21 @@ def _update_password_with_token(access_token: str, new_password: str) -> None:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
-def forgot_password(email: str) -> dict:
+def forgot_password(email: str, redirect_to: str | None = None) -> dict:
+    from app.services.redirect_auth import resolve_password_reset_redirect
+
     settings = get_settings()
     supabase = require_supabase()
-    redirect_to = f"{settings.frontend_url.rstrip('/')}/auth/reset-password"
+    target = resolve_password_reset_redirect(settings, redirect_to)
+    options = {"redirect_to": target}
     try:
-        supabase.auth.reset_password_for_email(email.strip(), {"redirect_to": redirect_to})
+        # redirect_to must be allowlisted in Supabase Dashboard → Auth → URL configuration.
+        supabase.auth.reset_password_for_email(email.strip(), options)
     except Exception as exc:
         raise _auth_error(exc, "Could not send reset email") from exc
     return {
         "message": "If an account exists for that email, a password reset link was sent.",
-        "redirect_to": redirect_to,
+        "redirect_to": target,
     }
 
 

@@ -1,7 +1,7 @@
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import field_validator, model_validator
+from pydantic import AliasChoices, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -38,8 +38,12 @@ class Settings(BaseSettings):
 
     supabase_url: str = ""
     supabase_anon_key: str = ""
-    supabase_service_key: str = ""
+    supabase_service_key: str = Field(
+        default="",
+        validation_alias=AliasChoices("SUPABASE_SERVICE_KEY", "SUPABASE_SERVICE_ROLE_KEY"),
+    )
     frontend_url: str = "http://localhost:3000"
+    additional_frontend_urls: str = ""
     jwt_expiry_seconds: int = 3600
 
     chat_message_max_length: int = 4000

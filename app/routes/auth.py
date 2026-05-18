@@ -39,6 +39,10 @@ class RefreshBody(BaseModel):
 
 class ForgotPasswordBody(BaseModel):
     email: EmailStr
+    redirect_to: str | None = Field(
+        default=None,
+        description="Must be {FRONTEND_URL}/auth/reset-password; allowlisted on gateway.",
+    )
 
 
 class ResetPasswordBody(BaseModel):
@@ -78,7 +82,7 @@ def auth_refresh(body: RefreshBody):
 
 @router.post("/auth/forgot-password")
 def auth_forgot_password(body: ForgotPasswordBody):
-    return supabase_auth.forgot_password(body.email)
+    return supabase_auth.forgot_password(body.email, body.redirect_to)
 
 
 @router.post("/auth/reset-password")
