@@ -2,7 +2,7 @@
 
 Quick checks against a running gateway. Replace the host/port in each example if yours differs (e.g. `http://localhost:8000`).
 
-Stub auth (`AUTH_MODE=stub`, default) accepts any non-empty bearer token (see `app/middleware/auth.py`). With **`AUTH_MODE=jwt`**, use a real access token from your IdP (`Authorization: Bearer <jwt>`); invalid or expired tokens return **401**.
+Protected routes require a valid Supabase access token (`Authorization: Bearer <access_token>` from `POST /auth/login`) unless you use the JWKS fallback without Supabase. Invalid or expired tokens return **401**.
 
 ## No auth (probes and metrics)
 
@@ -32,7 +32,7 @@ Correlation IDs: send **`X-Request-Id`** / **`X-Trace-Id`** (optional); gateway 
 
 ```bash
 curl -sS -X POST "http://192.168.86.179:30185/api/chat" \
-  -H "Authorization: Bearer demo-token" \
+  -H "Authorization: Bearer <access_token>" \
   -H "Content-Type: application/json" \
   -H "X-Session-Id: smoke-sess-001" \
   -H "X-Request-Id: smoke-req-001" \
@@ -48,7 +48,7 @@ curl -sS -X POST "http://192.168.86.179:30185/api/chat" \
 
 ```bash
 curl -sS -X POST "http://192.168.86.179:30185/api/chat" \
-  -H "Authorization: Bearer demo-token" \
+  -H "Authorization: Bearer <access_token>" \
   -H "Content-Type: application/json" \
   -d '{
     "message": "what is Taixing US visa status?",
@@ -62,7 +62,7 @@ curl -sS -X POST "http://192.168.86.179:30185/api/chat" \
 
 Expect `200`, `status: "success"`, echoed `request_id` / `trace_id` / `session_id`, and no `error` key in the JSON body.
 
-**JWT mode** (`AUTH_MODE=jwt`): replace `demo-token` with a valid **access token** from your IdP (`iss`, `aud`, `exp` must match gateway `AUTH_JWT_*`). Invalid or expired tokens return **401**.
+**JWKS fallback** (no Supabase): use a valid OIDC access token (`iss`, `aud`, `exp` must match `AUTH_JWT_*`). Invalid or expired tokens return **401**.
 
 ```bash
 # Example: substitute a real access token from your OIDC flow
@@ -77,7 +77,7 @@ curl -sS -X POST "http://192.168.86.179:30185/api/chat" \
 
 ```bash
 curl -N -sS -X POST "http://192.168.86.179:30185/api/chat" \
-  -H "Authorization: Bearer demo-token" \
+  -H "Authorization: Bearer <access_token>" \
   -H "Content-Type: application/json" \
   -H "X-Session-Id: smoke-sess-002" \
   -d '{
@@ -91,7 +91,7 @@ Expect lines starting with `event: meta`, then optional `event: rewrite`, then o
 
 ### huntAI web (Next BFF) — translated SSE
 
-The **Next.js** app in **layer-web-v1** exposes `POST /api/chat` on the **web** port (e.g. `http://localhost:3000`). It proxies to this gateway and **renames** SSE events for the browser (`status`, `result_chunk`, `stream_end`, …). To smoke the **full stack**, `curl -N` the **web** URL with a minimal body (`message`, optional `conversation_id` / `history`) and `Authorization: Bearer` aligned with `GATEWAY_BEARER_TOKEN` on the web server. See **layer-web-v1** [`docs/design.md`](../../layer-web-v1/docs/design.md) (section *Verifying SSE with curl*).
+The **Next.js** app in **layer-web-v1** exposes `POST /api/chat` on the **web** port (e.g. `http://localhost:3000`). It proxies to this gateway and **renames** SSE events for the browser (`status`, `result_chunk`, `stream_end`, …). To smoke the **full stack**, `curl -N` the **web** URL with a minimal body (`message`, optional `conversation_id` / `history`) and a session cookie from **`/login`** (or `Authorization: Bearer <access_token>`). See **layer-web-v1** [`docs/design.md`](../../layer-web-v1/docs/design.md) (section *Verifying SSE with curl*).
 
 **Auth failure** (no `Authorization` header)
 
@@ -111,7 +111,7 @@ If the gateway is in `gateway_json` mode, `POST /api/feedback` returns **501**.
 
 ```bash
 curl -sS -X POST "http://192.168.86.179:30185/api/feedback" \
-  -H "Authorization: Bearer demo-token" \
+  -H "Authorization: Bearer <access_token>" \
   -H "Content-Type: application/json" \
   -d '{
     "trace_id": "smoke-trace-001",
@@ -124,7 +124,7 @@ curl -sS -X POST "http://192.168.86.179:30185/api/feedback" \
 
 ```bash
 curl -sS -X POST "http://192.168.86.179:30185/api/feedback" \
-  -H "Authorization: Bearer demo-token" \
+  -H "Authorization: Bearer <access_token>" \
   -H "Content-Type: application/json" \
   -d '{
     "trace_id": "smoke-trace-001",

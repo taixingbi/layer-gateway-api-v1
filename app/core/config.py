@@ -24,13 +24,7 @@ class Settings(BaseSettings):
     orchestrator_readiness_timeout_ms: int = 3000
     orchestrator_readiness_probe_enabled: bool = True
 
-    auth_mode: Literal["stub", "jwt"] = "stub"
-    auth_stub_user_id: str = "user_001"
-    auth_stub_tenant_id: str = "tenant_01"
-    auth_stub_roles: str = "customer"
-    auth_stub_groups: str = ""
-    auth_stub_teams: str = ""
-
+    auth_mode: Literal["jwt"] = "jwt"
     auth_jwt_issuer: str = ""
     auth_jwt_audience: str = ""
     auth_jwt_jwks_url: str = ""
@@ -42,7 +36,17 @@ class Settings(BaseSettings):
     auth_jwt_claim_groups: str = "groups"
     auth_jwt_claim_teams: str = "teams"
 
+    supabase_url: str = ""
+    supabase_anon_key: str = ""
+    supabase_service_key: str = ""
+    frontend_url: str = "http://localhost:3000"
+    jwt_expiry_seconds: int = 3600
+
     chat_message_max_length: int = 4000
+
+    @property
+    def supabase_enabled(self) -> bool:
+        return bool((self.supabase_url or "").strip() and (self.supabase_anon_key or "").strip())
 
     # Timeout hierarchy (document / future wiring): outer > inner. Only ``orchestrator_timeout_ms`` drives httpx today.
     client_timeout_ms: int = 65000
@@ -56,8 +60,8 @@ class Settings(BaseSettings):
         return v
 
     @model_validator(mode="after")
-    def _validate_jwt_auth_config(self) -> "Settings":
-        if self.auth_mode != "jwt":
+    def _validate_auth_config(self) -> "Settings":
+        if self.supabase_enabled:
             return self
         missing: list[str] = []
         if not (self.auth_jwt_issuer or "").strip():
@@ -71,7 +75,7 @@ class Settings(BaseSettings):
             missing.append("AUTH_JWT_ALGORITHMS (non-empty)")
         if missing:
             raise ValueError(
-                "When AUTH_MODE=jwt, the following settings are required: " + ", ".join(missing)
+                "When Supabase is not configured, AUTH_JWT_* is required: " + ", ".join(missing)
             )
         return self
 

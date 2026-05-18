@@ -26,7 +26,7 @@ Move all AI-facing logic out of Next.js and into this Gateway API.
 - Tests for auth, validation, IDs, streaming contract, and retry/timeout mapping.
 
 ## Next Actions
-- **JWT / IdP:** production verification is implemented (`AUTH_MODE=jwt`, `AUTH_JWT_*` in `.env.example`); deploy with your issuer, audience, and JWKS URL. Stub remains for local dev (`AUTH_MODE=stub`).
+- **Auth:** Supabase (`SUPABASE_*`) for browser login and bearer verify; optional JWKS fallback (`AUTH_JWT_*`) when Supabase is unset.
 - Standardize non-2xx error envelope across all handlers.
 - Add metrics, rate limits, and circuit breaker.
 - Add OpenAPI examples and consumer docs for frontend integration.

@@ -88,6 +88,8 @@ def test_settings_jwt_mode_requires_issuer_audience_jwks():
 
 @pytest.fixture
 def jwt_env(monkeypatch):
+    monkeypatch.setenv("SUPABASE_URL", "")
+    monkeypatch.setenv("SUPABASE_ANON_KEY", "")
     monkeypatch.setenv("AUTH_MODE", "jwt")
     monkeypatch.setenv("AUTH_JWT_ISSUER", "https://issuer.test/")
     monkeypatch.setenv("AUTH_JWT_AUDIENCE", "my-api")

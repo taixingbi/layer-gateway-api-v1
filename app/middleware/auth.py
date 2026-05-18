@@ -5,12 +5,9 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
 from app.core.config import get_settings
-from app.middleware.paths import PUBLIC_PROBE_PATHS
+from app.middleware.paths import PUBLIC_AUTH_PATHS, PUBLIC_PROBE_PATHS
 from app.services.jwt_validator import JwtVerifyError
-
-
-def _split_csv(raw: str) -> list[str]:
-    return [p.strip() for p in raw.split(",") if p.strip()]
+from app.services.supabase_auth import SupabaseAuthError, verify_access_token_to_auth_context
 
 
 def _unauthorized(message: str = "Invalid or expired bearer token") -> JSONResponse:
@@ -20,25 +17,12 @@ def _unauthorized(message: str = "Invalid or expired bearer token") -> JSONRespo
     )
 
 
-def _stub_auth_context(settings) -> dict:
-    roles = _split_csv(settings.auth_stub_roles or "")
-    if not roles:
-        roles = ["customer"]
-    return {
-        "user_id": settings.auth_stub_user_id,
-        "tenant_id": settings.auth_stub_tenant_id,
-        "roles": roles,
-        "groups": _split_csv(settings.auth_stub_groups or ""),
-        "teams": _split_csv(settings.auth_stub_teams or ""),
-    }
-
-
 class AuthMiddleware(BaseHTTPMiddleware):
     """Authenticate incoming requests and attach trusted auth context."""
 
     async def dispatch(self, request: Request, call_next) -> Response:
         # Keep health checks unauthenticated for probes and uptime monitors.
-        if request.url.path in PUBLIC_PROBE_PATHS:
+        if request.url.path in PUBLIC_PROBE_PATHS or request.url.path in PUBLIC_AUTH_PATHS:
             return await call_next(request)
 
         # Require bearer token on all gateway business endpoints.
@@ -58,13 +42,18 @@ class AuthMiddleware(BaseHTTPMiddleware):
             )
 
         settings = get_settings()
-        if settings.auth_mode == "stub":
-            request.state.auth_context = _stub_auth_context(settings)
+        if settings.supabase_enabled:
+            try:
+                request.state.auth_context = await asyncio.to_thread(
+                    verify_access_token_to_auth_context, token, settings
+                )
+            except SupabaseAuthError:
+                return _unauthorized()
             return await call_next(request)
 
         validator = getattr(request.app.state, "jwt_validator", None)
         if validator is None:
-            return _unauthorized()
+            return _unauthorized("Gateway authentication is not configured (set SUPABASE_* or AUTH_JWT_*)")
 
         try:
             auth_context = await asyncio.to_thread(validator.verify_to_auth_context, token)

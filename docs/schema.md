@@ -12,7 +12,7 @@ Correlation IDs (`request_id`, `trace_id`, `session_id`) are taken from **header
 
 | Header | Required | Description |
 |--------|----------|-------------|
-| `Authorization` | Yes | `Bearer <token>` (stub: any non-empty token; JWT when `AUTH_MODE=jwt`) |
+| `Authorization` | Yes | `Bearer <access_token>` (Supabase session JWT or OIDC when using JWKS fallback) |
 | `Content-Type` | Yes | `application/json` |
 | `Accept` | No | `text/event-stream` to stream; omit for JSON response |
 | `X-Session-Id` | No | 3–128 chars; if omitted the gateway mints `sess_<hex>` |

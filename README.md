@@ -74,24 +74,20 @@ cp .env.example .env
 
 Defaults also live in [`app/core/config.py`](app/core/config.py). `.env.example` documents all variables, including `ORCHESTRATOR_CONTRACT` (`gateway_json` vs `flat_headers`), and auth:
 
-- **`AUTH_MODE=stub`** (default): local and smoke tests. Any non-empty `Authorization: Bearer` is accepted; trusted `user_id` / `tenant_id` / `roles` come from **`AUTH_STUB_*`**, not from the token string.
-- **`AUTH_MODE=jwt`**: production. The gateway verifies access tokens with **`AUTH_JWT_ISSUER`**, **`AUTH_JWT_AUDIENCE`**, and **`AUTH_JWT_JWKS_URL`** (see `.env.example`); trusted context is built from JWT claims (`AUTH_JWT_CLAIM_*`).
+- **Supabase** (recommended): set **`SUPABASE_URL`** and **`SUPABASE_ANON_KEY`**. Protected routes verify the bearer with `supabase.auth.get_user` and load **`profiles`** for roles/team/group.
+- **JWKS fallback** (no Supabase): set **`AUTH_JWT_ISSUER`**, **`AUTH_JWT_AUDIENCE`**, and **`AUTH_JWT_JWKS_URL`** from your OIDC provider. Optional **`AUTH_JWT_CLAIM_*`** map claims into gateway `user_id`, `tenant_id`, `roles`, `groups`, and `teams`.
 
-Example fragment for a header-style orchestrator with **stub auth** (see `.env.example` for the full file):
+Example fragment (see `.env.example` for the full file):
 
 ```env
 ORCHESTRATOR_BASE_URL=http://192.168.86.179:30184
 ORCHESTRATOR_CHAT_PATH=/orchestrator/answer
 ORCHESTRATOR_FEEDBACK_PATH=/feedback
 ORCHESTRATOR_CONTRACT=flat_headers
-AUTH_MODE=stub
-AUTH_STUB_USER_ID=taixing
-AUTH_STUB_ROLES=hr
-AUTH_STUB_GROUPS=engineering
-AUTH_STUB_TEAMS=rag-platform
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_ANON_KEY=your-anon-key
+FRONTEND_URL=http://localhost:3000
 ```
-
-**Production JWT** (`AUTH_MODE=jwt`): set `AUTH_JWT_ISSUER`, `AUTH_JWT_AUDIENCE` (comma-separated if multiple), and `AUTH_JWT_JWKS_URL` from your OIDC provider (issuer, API audience, JWKS URI). Optional: `AUTH_JWT_CLAIM_*` and `AUTH_JWT_DEFAULT_TENANT_ID` to map claims into gateway `user_id`, `tenant_id`, `roles`, `groups`, and `teams`. The gateway verifies signature (RS256/ES256 by default), `iss`, `aud`, and `exp`.
 
 Legacy nested JSON orchestrator (default in code when unset):
 
@@ -192,7 +188,7 @@ curl:
 
 ```bash
 curl -sS http://localhost:8000/api/chat \
-  -H "Authorization: Bearer demo-token" \
+  -H "Authorization: Bearer <access_token>" \
   -H "Content-Type: application/json" \
   -H "X-Session-Id: sess_123" \
   -H "X-Request-Id: req_demo_001" \
@@ -255,7 +251,7 @@ curl:
 
 ```bash
 curl -N http://localhost:8000/api/chat \
-  -H "Authorization: Bearer demo-token" \
+  -H "Authorization: Bearer <access_token>" \
   -H "Content-Type: application/json" \
   -H "Accept: text/event-stream" \
   -H "X-Session-Id: sess_123" \
@@ -327,7 +323,7 @@ Circuit breaker per upstream, health-scored routing, static API-key auth, rate l
 
 ## Notes
 
-- **Auth:** `AUTH_MODE=stub` (default) accepts any non-empty Bearer token and injects trusted identity from `AUTH_STUB_*`. **`AUTH_MODE=jwt`** verifies OIDC access tokens against `AUTH_JWT_JWKS_URL` with issuer/audience checks and builds trusted context from JWT claims (see `.env.example`).
+- **Auth:** Supabase (`SUPABASE_URL` + `SUPABASE_ANON_KEY`) verifies bearer tokens and loads `profiles`; without Supabase, JWKS (`AUTH_JWT_*`) verifies OIDC access tokens (see `.env.example`).
 - Orchestrator contract is env-driven (`gateway_json` vs `flat_headers`); see README and `app/core/config.py`.
 
 ## Docs
