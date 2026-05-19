@@ -1,3 +1,5 @@
+"""OrchestratorClient HTTP mapping, retries, and flat_headers contract."""
+
 import json
 
 import httpx
@@ -18,6 +20,7 @@ from app.services.orchestrator_client import OrchestratorClient
 
 
 def _payload() -> OrchestratorChatRequest:
+    """Minimal gateway_json chat payload for tests."""
     return OrchestratorChatRequest(
         auth=AuthContext(user_id="u1", tenant_id="t1", roles=["customer"]),
         context=OrchestratorContext(session_id="sess_1", request_id="req_1", trace_id="trace_1"),
@@ -27,6 +30,7 @@ def _payload() -> OrchestratorChatRequest:
 
 
 def _ctx(stream: bool = False, conversation_id: str | None = None) -> OrchestratorCallContext:
+    """Default call context with optional stream and conversation id."""
     return OrchestratorCallContext(
         session_id="sess_1",
         request_id="req_1",

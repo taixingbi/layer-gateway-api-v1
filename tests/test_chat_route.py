@@ -1,3 +1,5 @@
+"""Integration tests for ``POST /api/chat`` validation and orchestrator wiring."""
+
 import json
 from unittest.mock import patch
 
@@ -37,6 +39,8 @@ class CapturingOrchestratorStub:
 
 
 class StubOrchestratorClient:
+    """Returns fixed non-stream answer for happy-path chat tests."""
+
     async def chat(self, payload, ctx=None):
         return type(
             "Resp",
@@ -55,10 +59,12 @@ class StubOrchestratorClient:
 
 
 def _auth_headers():
+    """Bearer header matching conftest fake Supabase verify."""
     return {"Authorization": "Bearer token-123"}
 
 
 class StubOrchestratorWithFollowUps:
+    """Non-stream response including citations and follow-up questions."""
     async def chat(self, payload, ctx=None):
         return type(
             "Resp",

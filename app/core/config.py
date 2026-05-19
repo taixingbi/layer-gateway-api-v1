@@ -1,3 +1,5 @@
+"""Environment-backed gateway settings (Pydantic ``BaseSettings``)."""
+
 from functools import lru_cache
 from typing import Literal
 
@@ -6,6 +8,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
+    """Gateway configuration loaded from environment and optional ``.env`` file."""
+
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     app_name: str = "layer-gateway-api-v1"
@@ -50,6 +54,7 @@ class Settings(BaseSettings):
 
     @property
     def supabase_enabled(self) -> bool:
+        """True when Supabase URL and anon key are both configured."""
         return bool((self.supabase_url or "").strip() and (self.supabase_anon_key or "").strip())
 
     # Timeout hierarchy (document / future wiring): outer > inner. Only ``orchestrator_timeout_ms`` drives httpx today.
@@ -59,12 +64,14 @@ class Settings(BaseSettings):
     @field_validator("auth_mode", mode="before")
     @classmethod
     def _normalize_auth_mode(cls, v: str) -> str:
+        """Lowercase and strip ``auth_mode`` from env."""
         if isinstance(v, str):
             return v.strip().lower()
         return v
 
     @model_validator(mode="after")
     def _validate_auth_config(self) -> "Settings":
+        """Require JWT issuer/audience/JWKS when Supabase is not enabled."""
         if self.supabase_enabled:
             return self
         missing: list[str] = []
@@ -84,9 +91,11 @@ class Settings(BaseSettings):
         return self
 
     def jwt_algorithm_list(self) -> list[str]:
+        """Parse comma-separated ``AUTH_JWT_ALGORITHMS`` into a list."""
         return [a.strip() for a in self.auth_jwt_algorithms.split(",") if a.strip()]
 
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
+    """Return cached gateway settings singleton."""
     return Settings()

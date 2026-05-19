@@ -1,3 +1,5 @@
+"""Chat API: non-stream JSON and gateway-managed SSE streaming to the orchestrator."""
+
 import json
 import time
 from typing import Any
@@ -181,6 +183,7 @@ def _build_call_context(
 
 @router.post("/chat", response_model=ChatResponse, response_model_exclude_none=True)
 async def chat(request: Request, payload: ChatRequest):
+    """Handle chat (JSON or SSE) via orchestrator with correlation and validation."""
     request.state.access_log_stream = False
     _attach_chat_session_id(request)
     request.state.conversation_id = _resolve_conversation_id(request, payload)

@@ -1,3 +1,5 @@
+"""Inbound chat request body from the web client."""
+
 from datetime import datetime
 from typing import Any
 
@@ -7,6 +9,8 @@ from app.schemas.history import ChatHistoryMessage
 
 
 class ChatRequest(BaseModel):
+    """Validated chat POST payload (message, optional history, stream flag)."""
+
     model_config = ConfigDict(extra="forbid")
 
     conversation_id: str | None = Field(default=None, min_length=3, max_length=128)

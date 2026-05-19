@@ -1,3 +1,5 @@
+"""Tests for US Eastern timestamp helpers in ``app.core.time_util``."""
+
 import re
 
 from app.core.time_util import eastern_from_timestamp, eastern_now_iso

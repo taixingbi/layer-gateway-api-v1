@@ -1,3 +1,5 @@
+"""Feedback proxy to orchestrator (flat_headers contract only)."""
+
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse, Response
 
@@ -9,6 +11,7 @@ router = APIRouter(prefix="/api", tags=["feedback"])
 
 @router.post("/feedback")
 async def post_feedback(request: Request, payload: FeedbackRequest):
+    """Forward feedback payload to orchestrator when contract is ``flat_headers``."""
     settings = get_settings()
     if settings.orchestrator_contract != "flat_headers":
         raise HTTPException(

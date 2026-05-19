@@ -1,3 +1,5 @@
+"""Structured JSON logging for the gateway (Eastern timestamps, stable field order)."""
+
 import logging
 import sys
 import time
@@ -98,10 +100,12 @@ _LEVEL_NUM: dict[str, int] = {
 
 
 def _phase_for_event(event: str) -> str:
+    """Resolve log phase from machine event name."""
     return _EVENT_PHASE.get(event, "system")
 
 
 def _message_for_event(event: str) -> str:
+    """Resolve human message from machine event name."""
     return _EVENT_MESSAGE.get(event, event)
 
 
@@ -115,6 +119,7 @@ def _base_log_extra(
     ts: str | None = None,
     **fields: Any,
 ) -> dict[str, Any]:
+    """Build ``LogRecord.extra`` dict with ts, level, phase, event, and custom fields."""
     # ``message`` is reserved on ``LogRecord``; emit human text as ``log_message`` and
     # promote to ``message`` in ``EasternJsonFormatter``.
     return {
@@ -138,6 +143,7 @@ class EasternJsonFormatter(jsonlogger.JsonFormatter):
         return eastern_from_timestamp(record.created)
 
     def process_log_record(self, log_data: dict[str, Any]) -> dict[str, Any]:
+        """Normalize and order fields for JSON output."""
         log_data.pop("asctime", None)
         levelname = log_data.pop("levelname", None)
         if levelname is not None and "level" not in log_data:
@@ -165,6 +171,7 @@ class EasternJsonFormatter(jsonlogger.JsonFormatter):
 
 
 def configure_logging(env: str) -> None:
+    """Attach Eastern JSON formatter to gateway logger and emit ``logger_configured``."""
     from app.core.config import get_settings
 
     handler = logging.StreamHandler(sys.stdout)
@@ -182,6 +189,7 @@ def configure_logging(env: str) -> None:
 
 
 def get_logger() -> logging.Logger:
+    """Return the structured gateway logger (``gateway``)."""
     return logging.getLogger(GATEWAY_LOGGER_NAME)
 
 

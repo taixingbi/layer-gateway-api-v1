@@ -1,3 +1,5 @@
+"""JWT auth mode: claim mapping, settings validation, and chat middleware."""
+
 import time
 
 import jwt
@@ -13,6 +15,8 @@ from app.services.jwt_validator import JwtValidator, JwtVerifyError, claims_to_a
 
 
 class _StubOrch:
+    """Minimal orchestrator stub for JWT integration tests."""
+
     async def chat(self, payload, ctx=None):
         return type(
             "R",
@@ -25,6 +29,8 @@ class _StubOrch:
 
 
 class _StaticJwkClient:
+    """Return a fixed signing key for JwtValidator tests."""
+
     def __init__(self, signing_key):
         self._signing_key = signing_key
 
@@ -33,6 +39,7 @@ class _StaticJwkClient:
 
 
 def _rsa_keypair_and_jwk():
+    """Generate RSA keypair and JWK for signing test tokens."""
     private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048, backend=default_backend())
     public_key = private_key.public_key()
     jwk = RSAAlgorithm.to_jwk(public_key, as_dict=True)
@@ -88,6 +95,7 @@ def test_settings_jwt_mode_requires_issuer_audience_jwks():
 
 @pytest.fixture
 def jwt_env(monkeypatch):
+    """Clear Supabase env and enable JWT auth settings."""
     monkeypatch.setenv("SUPABASE_URL", "")
     monkeypatch.setenv("SUPABASE_ANON_KEY", "")
     monkeypatch.setenv("AUTH_MODE", "jwt")
@@ -100,6 +108,7 @@ def jwt_env(monkeypatch):
 
 
 def _mint_token(private_key, **extra) -> str:
+    """Encode a valid RS256 access token for tests."""
     now = int(time.time())
     payload = {
         "iss": "https://issuer.test/",

@@ -1,3 +1,5 @@
+"""Feedback proxy route tests (flat_headers contract)."""
+
 from fastapi.testclient import TestClient
 
 from app.core.config import get_settings
@@ -5,10 +7,12 @@ from app.main import create_app
 
 
 def _auth_headers():
+    """Bearer header matching conftest fake Supabase verify."""
     return {"Authorization": "Bearer token-123"}
 
 
 class StubWithFeedback:
+    """Orchestrator stub that records feedback POST body."""
     async def chat(self, *args, **kwargs):
         raise NotImplementedError
 

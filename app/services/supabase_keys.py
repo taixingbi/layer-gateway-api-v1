@@ -1,3 +1,5 @@
+"""Helpers for inspecting Supabase API key JWT payloads."""
+
 import base64
 import json
 

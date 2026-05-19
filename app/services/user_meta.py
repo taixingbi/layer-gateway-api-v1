@@ -12,6 +12,7 @@ from app.services.supabase_client import get_supabase_admin_client, get_supabase
 
 
 def meta_get(user, key: str, default: str) -> str:
+    """Read string metadata from user or app metadata with default."""
     for source in (user.user_metadata or {}, user.app_metadata or {}):
         value = source.get(key)
         if isinstance(value, str) and value.strip():
@@ -20,6 +21,7 @@ def meta_get(user, key: str, default: str) -> str:
 
 
 def _jwt_role(key: str | None) -> str | None:
+    """Decode ``role`` from Supabase JWT key string."""
     if not key or not key.startswith("eyJ"):
         return None
     try:
@@ -36,6 +38,7 @@ def _jwt_role(key: str | None) -> str | None:
 
 
 def _service_role_client():
+    """Return admin client only when service key has ``service_role`` claim."""
     settings = get_settings()
     admin = get_supabase_admin_client()
     if not admin or not (settings.supabase_service_key or "").strip():
@@ -46,6 +49,7 @@ def _service_role_client():
 
 
 def _update_user_metadata(access_token: str, data: dict) -> None:
+    """PUT merged user_metadata via Auth REST with user access token."""
     settings = get_settings()
     url = f"{settings.supabase_url.rstrip('/')}/auth/v1/user"
     try:
@@ -76,6 +80,7 @@ def sync_jwt_metadata(
     plan: str | None = None,
     roles: list[str] | None = None,
 ) -> None:
+    """Update auth.users user_metadata (admin API or user token fallback)."""
     payload: dict = {}
     if team is not None:
         payload["team"] = team

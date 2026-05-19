@@ -1,3 +1,5 @@
+"""Bearer authentication middleware (Supabase or JWKS JWT)."""
+
 import asyncio
 
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -11,6 +13,7 @@ from app.services.supabase_auth import SupabaseAuthError, verify_access_token_to
 
 
 def _unauthorized(message: str = "Invalid or expired bearer token") -> JSONResponse:
+    """Return a 401 JSON error envelope."""
     return JSONResponse(
         status_code=401,
         content={"status": "error", "error": {"code": "unauthorized", "message": message}},
@@ -21,6 +24,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
     """Authenticate incoming requests and attach trusted auth context."""
 
     async def dispatch(self, request: Request, call_next) -> Response:
+        """Validate bearer token and set ``request.state.auth_context``."""
         # Keep health checks unauthenticated for probes and uptime monitors.
         if request.url.path in PUBLIC_PROBE_PATHS or request.url.path in PUBLIC_AUTH_PATHS:
             return await call_next(request)

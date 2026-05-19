@@ -1,3 +1,5 @@
+"""Per-request correlation and identity for orchestrator HTTP calls."""
+
 from dataclasses import dataclass
 
 

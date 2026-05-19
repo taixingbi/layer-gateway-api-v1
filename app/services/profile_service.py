@@ -1,3 +1,5 @@
+"""Supabase profiles CRUD, username login resolution, and JWT metadata sync."""
+
 import re
 import uuid
 
@@ -25,6 +27,8 @@ PROFILE_COLUMNS = (
 
 
 class ProfileUpdate(BaseModel):
+    """PATCH body for mutable profile fields."""
+
     email: EmailStr | None = None
     username: str | None = Field(default=None, min_length=1, max_length=64)
     display_name: str | None = Field(default=None, min_length=1, max_length=128)
@@ -36,12 +40,14 @@ class ProfileUpdate(BaseModel):
     @field_validator("roles")
     @classmethod
     def roles_not_empty(cls, value: list[str] | None) -> list[str] | None:
+        """Reject empty role lists when roles are provided."""
         if value is not None and not any(str(r).strip() for r in value):
             raise ValueError("roles must not be empty")
         return value
 
 
 def _default_username(email: str | None, user_id: str) -> str:
+    """Derive a unique-ish username from email local part or user id."""
     if email and "@" in email:
         local = email.split("@", 1)[0].lower()
         base = re.sub(r"[^a-z0-9_]", "_", local).strip("_")[:48]
@@ -51,6 +57,7 @@ def _default_username(email: str | None, user_id: str) -> str:
 
 
 def _roles_from_user(user, row: dict) -> list[str]:
+    """Resolve roles from profile row or Supabase user metadata."""
     if row.get("roles") is not None:
         return normalize_roles(row.get("roles"))
     for source in (user.user_metadata or {}, user.app_metadata or {}):
@@ -63,6 +70,7 @@ def _roles_from_user(user, row: dict) -> list[str]:
 
 
 def user_to_claims(user, profile_row: dict | None = None) -> UserClaims:
+    """Build ``UserClaims`` from Supabase user and optional profile row."""
     row = profile_row or {}
     return UserClaims(
         user_id=user.id,
@@ -75,6 +83,7 @@ def user_to_claims(user, profile_row: dict | None = None) -> UserClaims:
 
 
 def _claims_from_row(row: dict) -> UserClaims:
+    """Map profiles table row to ``UserClaims``."""
     return UserClaims(
         user_id=row["id"],
         email=row.get("email"),
@@ -86,6 +95,7 @@ def _claims_from_row(row: dict) -> UserClaims:
 
 
 def _row_to_dict(row: dict) -> dict:
+    """Serialize profile row for API response."""
     claims = _claims_from_row(row)
     return {
         "id": row["id"],
@@ -103,6 +113,7 @@ def _row_to_dict(row: dict) -> dict:
 
 
 def _handle_db_error(exc: Exception) -> None:
+    """Map PostgREST/RLS errors to HTTP exceptions."""
     if isinstance(exc, APIError):
         message = exc.message or str(exc)
         if "schema cache" in message.lower() or "could not find" in message.lower():
@@ -125,6 +136,7 @@ def _handle_db_error(exc: Exception) -> None:
 
 
 def _email_from_username_rpc(username: str) -> str | None:
+    """Look up email via ``get_email_for_username`` RPC when installed."""
     supabase = require_supabase()
     try:
         result = supabase.rpc("get_email_for_username", {"p_username": username}).execute()
@@ -144,6 +156,7 @@ def _email_from_username_rpc(username: str) -> str | None:
 
 
 def _email_from_username_admin(username: str) -> str | None:
+    """Look up email from profiles table using service-role client."""
     admin = get_supabase_admin_client()
     if not admin:
         return None
@@ -158,6 +171,7 @@ def _email_from_username_admin(username: str) -> str | None:
 
 
 def resolve_login_email(identifier: str) -> str:
+    """Map username or email identifier to email for Supabase password login."""
     raw = identifier.strip()
     if not raw:
         raise HTTPException(status_code=401, detail="Invalid login credentials")
@@ -181,6 +195,7 @@ def resolve_login_email(identifier: str) -> str:
 
 
 def _profiles_table(access_token: str):
+    """Return PostgREST profiles table (admin or user-scoped)."""
     admin = get_supabase_admin_client()
     if admin:
         return admin.table("profiles")
@@ -190,6 +205,7 @@ def _profiles_table(access_token: str):
 
 
 def fetch_profile_row(access_token: str, user_id: str) -> dict | None:
+    """Load one profile row by user id or None."""
     try:
         result = _profiles_table(access_token).select(PROFILE_COLUMNS).eq("id", user_id).execute()
     except Exception as exc:
@@ -200,6 +216,7 @@ def fetch_profile_row(access_token: str, user_id: str) -> dict | None:
 
 
 def ensure_profile(access_token: str, claims: UserClaims) -> dict:
+    """Create profile row on first access if missing."""
     row = fetch_profile_row(access_token, claims.user_id)
     if row:
         return _row_to_dict(row)
@@ -244,6 +261,7 @@ def ensure_profile(access_token: str, claims: UserClaims) -> dict:
 
 
 def get_profile(access_token: str, claims: UserClaims) -> dict:
+    """Return profile dict, creating row if needed."""
     row = fetch_profile_row(access_token, claims.user_id)
     if row:
         return _row_to_dict(row)
@@ -251,6 +269,7 @@ def get_profile(access_token: str, claims: UserClaims) -> dict:
 
 
 def update_profile(access_token: str, claims: UserClaims, body: ProfileUpdate) -> dict:
+    """Apply PATCH fields and sync JWT metadata."""
     ensure_profile(access_token, claims)
     updates: dict = {}
     if body.email is not None:

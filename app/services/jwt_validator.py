@@ -1,3 +1,5 @@
+"""JWKS-based JWT verification when Supabase is not configured."""
+
 from __future__ import annotations
 
 from typing import Any, Protocol
@@ -9,6 +11,8 @@ from app.core.config import Settings
 
 
 class SigningKeyProvider(Protocol):
+    """Protocol for JWKS signing key lookup."""
+
     def get_signing_key_from_jwt(self, token: str) -> Any: ...
 
 
@@ -17,10 +21,12 @@ class JwtVerifyError(Exception):
 
 
 def _split_csv(raw: str) -> list[str]:
+    """Split comma-separated env string into non-empty parts."""
     return [p.strip() for p in raw.split(",") if p.strip()]
 
 
 def _audiences_from_settings(settings: Settings) -> str | list[str]:
+    """Resolve JWT audience (single string or list for PyJWT)."""
     parts = _split_csv(settings.auth_jwt_audience)
     if not parts:
         raise JwtVerifyError("invalid auth configuration")
@@ -30,6 +36,7 @@ def _audiences_from_settings(settings: Settings) -> str | list[str]:
 
 
 def _claim_to_str_list(value: Any) -> list[str]:
+    """Normalize JWT claim to list of non-empty strings."""
     if value is None:
         return []
     if isinstance(value, list):
@@ -48,6 +55,7 @@ def _claim_to_str_list(value: Any) -> list[str]:
 
 
 def _get_scalar_claim(claims: dict[str, Any], claim_name: str) -> str:
+    """Read one string claim by configured name."""
     if not claim_name:
         return ""
     raw = claims.get(claim_name)
@@ -86,10 +94,12 @@ class JwtValidator:
     """OIDC-style access token verification using JWKS (production)."""
 
     def __init__(self, settings: Settings, jwk_client: SigningKeyProvider | None = None):
+        """Configure validator with settings and optional JWKS client override."""
         self._settings = settings
         self._jwk_client: SigningKeyProvider = jwk_client or PyJWKClient(settings.auth_jwt_jwks_url)
 
     def verify(self, token: str) -> dict[str, Any]:
+        """Verify signature, issuer, audience, and expiry; return JWT claims."""
         try:
             signing_key = self._jwk_client.get_signing_key_from_jwt(token)
             payload = jwt.decode(
@@ -110,5 +120,6 @@ class JwtValidator:
         return payload
 
     def verify_to_auth_context(self, token: str) -> dict[str, Any]:
+        """Verify token and map claims to gateway ``auth_context`` dict."""
         claims = self.verify(token)
         return claims_to_auth_context(claims, self._settings)

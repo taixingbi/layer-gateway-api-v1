@@ -1,3 +1,5 @@
+"""Supabase Python client factories (anon and service role)."""
+
 from functools import lru_cache
 
 from supabase import Client, create_client
@@ -8,6 +10,7 @@ from app.services.supabase_keys import jwt_role
 
 @lru_cache(maxsize=1)
 def get_supabase_client() -> Client | None:
+    """Return anon-key Supabase client or None if not configured."""
     settings = get_settings()
     if not settings.supabase_enabled:
         return None
@@ -16,6 +19,7 @@ def get_supabase_client() -> Client | None:
 
 @lru_cache(maxsize=1)
 def get_supabase_admin_client() -> Client | None:
+    """Return service-role Supabase client or None if key missing."""
     settings = get_settings()
     key = (settings.supabase_service_key or "").strip()
     if not settings.supabase_enabled or not key:
@@ -24,16 +28,19 @@ def get_supabase_admin_client() -> Client | None:
 
 
 def admin_client_configured() -> bool:
+    """True when Supabase is enabled and service key is set."""
     settings = get_settings()
     return bool(settings.supabase_enabled and (settings.supabase_service_key or "").strip())
 
 
 def service_key_role() -> str | None:
+    """Decode ``role`` claim from configured service key JWT."""
     settings = get_settings()
     return jwt_role(settings.supabase_service_key)
 
 
 def require_supabase() -> Client:
+    """Return anon client or raise if Supabase env is missing."""
     client = get_supabase_client()
     if client is None:
         raise RuntimeError(

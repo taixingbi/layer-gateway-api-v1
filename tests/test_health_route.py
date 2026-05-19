@@ -1,3 +1,5 @@
+"""Health and readiness probe route tests."""
+
 from fastapi.testclient import TestClient
 
 from app.core.config import Settings, get_settings

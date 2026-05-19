@@ -1,3 +1,5 @@
+"""Supabase Auth operations: sessions, login, signup, and password reset."""
+
 import httpx
 from fastapi import HTTPException
 from supabase_auth.errors import AuthApiError
@@ -24,6 +26,7 @@ class SupabaseAuthError(Exception):
 
 
 def _assert_distinct_tokens(access_token: str | None, refresh_token: str | None) -> None:
+    """Reject sessions where access and refresh tokens are identical (misconfiguration)."""
     if access_token and refresh_token and access_token == refresh_token:
         raise HTTPException(
             status_code=500,
@@ -32,6 +35,7 @@ def _assert_distinct_tokens(access_token: str | None, refresh_token: str | None)
 
 
 def _session_payload(session, claims: UserClaims) -> dict:
+    """Build API session JSON from Supabase session + profile claims."""
     settings = get_settings()
     if not session:
         return {
@@ -56,6 +60,7 @@ def _session_payload(session, claims: UserClaims) -> dict:
 
 
 def verify_access_token(access_token: str) -> UserClaims:
+    """Validate bearer token with Supabase and load profile claims."""
     supabase = require_supabase()
     try:
         response = supabase.auth.get_user(access_token)
@@ -70,12 +75,14 @@ def verify_access_token(access_token: str) -> UserClaims:
 
 
 def verify_access_token_to_auth_context(access_token: str, settings: Settings | None = None) -> dict:
+    """Map verified token to gateway auth context dict for middleware."""
     settings = settings or get_settings()
     claims = verify_access_token(access_token)
     return claims.to_auth_context(settings)
 
 
 def signup(email: str, password: str) -> dict:
+    """Create account via Supabase; may require email confirmation before session exists."""
     supabase = require_supabase()
     try:
         response = supabase.auth.sign_up({"email": email, "password": password})
@@ -109,6 +116,7 @@ def signup(email: str, password: str) -> dict:
 
 
 def login(identifier: str, password: str) -> dict:
+    """Sign in with email or username (resolved to email) + password."""
     supabase = require_supabase()
     id_masked = mask_identifier(identifier)
     try:
@@ -151,6 +159,7 @@ def login(identifier: str, password: str) -> dict:
 
 
 def refresh_session(refresh_token: str) -> dict:
+    """Refresh access token using Supabase refresh token."""
     supabase = require_supabase()
     try:
         response = supabase.auth.refresh_session(refresh_token)
@@ -169,6 +178,7 @@ def refresh_session(refresh_token: str) -> dict:
 
 
 def _auth_error(exc: Exception, default: str = "Request failed") -> HTTPException:
+    """Normalize Supabase/auth exceptions to HTTPException."""
     if isinstance(exc, AuthApiError):
         return HTTPException(status_code=400, detail=str(exc))
     if isinstance(exc, HTTPException):
@@ -177,6 +187,7 @@ def _auth_error(exc: Exception, default: str = "Request failed") -> HTTPExceptio
 
 
 def _update_password_with_token(access_token: str, new_password: str) -> None:
+    """PUT /auth/v1/user with recovery or session access token."""
     settings = get_settings()
     url = f"{settings.supabase_url.rstrip('/')}/auth/v1/user"
     try:
@@ -199,6 +210,7 @@ def _update_password_with_token(access_token: str, new_password: str) -> None:
 
 
 def forgot_password(email: str, redirect_to: str | None = None) -> dict:
+    """Send password-reset email via Supabase with allowlisted ``redirect_to``."""
     from app.services.redirect_auth import resolve_password_reset_redirect
 
     settings = get_settings()
@@ -230,6 +242,7 @@ def forgot_password(email: str, redirect_to: str | None = None) -> dict:
 
 
 def reset_password(access_token: str, new_password: str, refresh_token: str | None = None) -> dict:
+    """Complete password reset from email link tokens; optionally establish session."""
     supabase = require_supabase()
     has_refresh = bool(refresh_token)
     try:
@@ -307,6 +320,7 @@ def reset_password(access_token: str, new_password: str, refresh_token: str | No
 
 
 def change_password(access_token: str, new_password: str, refresh_token: str | None = None) -> dict:
+    """Change password for signed-in user; optionally refresh session."""
     supabase = require_supabase()
     claims = verify_access_token(access_token)
     _update_password_with_token(access_token, new_password)

@@ -4,6 +4,7 @@ ROLE_OPTIONS = ("user", "admin")
 
 
 def normalize_roles(value) -> list[str]:
+    """Map arbitrary role input to allowed ``ROLE_OPTIONS`` (default ``user``)."""
     raw: list[str] = []
     if value is None:
         raw = []

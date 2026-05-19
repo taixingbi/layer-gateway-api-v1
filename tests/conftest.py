@@ -1,3 +1,5 @@
+"""Pytest fixtures: mock Supabase auth for protected routes."""
+
 import pytest
 
 from app.core.config import get_settings

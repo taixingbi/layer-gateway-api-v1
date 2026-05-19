@@ -1,3 +1,5 @@
+"""Mint or propagate request and trace correlation IDs on each request."""
+
 from uuid import uuid4
 
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -13,7 +15,10 @@ def _with_prefix(prefix: str) -> str:
 
 
 class RequestContextMiddleware(BaseHTTPMiddleware):
+    """Attach ``request_id`` and ``trace_id`` to state and response headers."""
+
     async def dispatch(self, request: Request, call_next) -> Response:
+        """Mint or reuse correlation IDs; skip probes and metrics."""
         # Probes and metrics: do not mint, persist, or echo request/trace IDs (keep scrapers/probes noise-free).
         if request.url.path in PUBLIC_PROBE_PATHS:
             return await call_next(request)

@@ -1,3 +1,5 @@
+"""FastAPI application factory, lifespan, and middleware stack."""
+
 from contextlib import asynccontextmanager
 
 import httpx
@@ -22,6 +24,7 @@ from app.services.supabase_client import admin_client_configured, service_key_ro
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    """Wire auth validator and orchestrator HTTP client for the app lifetime."""
     settings = get_settings()
     role = service_key_role() if settings.supabase_enabled else None
     log_event(
@@ -51,6 +54,7 @@ async def lifespan(app: FastAPI):
 
 
 def create_app() -> FastAPI:
+    """Build the gateway FastAPI app with middleware and route routers."""
     settings = get_settings()
     configure_logging(settings.env)
 

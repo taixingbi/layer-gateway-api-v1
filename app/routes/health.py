@@ -1,3 +1,5 @@
+"""Liveness and readiness probe routes."""
+
 from fastapi import APIRouter, HTTPException, Request
 
 from app.core.config import get_settings
@@ -7,6 +9,7 @@ router = APIRouter(tags=["health"])
 
 @router.get("/health")
 async def health():
+    """Return simple liveness for load balancers and uptime monitors."""
     # Simple liveness signal for load balancers and uptime monitors.
     return {"status": "ok"}
 

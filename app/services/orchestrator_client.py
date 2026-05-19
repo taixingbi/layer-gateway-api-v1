@@ -1,3 +1,5 @@
+"""HTTP client for layer orchestrator chat, stream, feedback, and readiness."""
+
 import json
 import time
 from collections.abc import AsyncGenerator, Awaitable, Callable
@@ -20,6 +22,7 @@ ORCHESTRATOR_API_RESPONSE_EVENT = "orchestrator_api_response"
 
 
 def _orch_correlation_fields(ctx: OrchestratorCallContext | None) -> dict[str, str]:
+    """Extract correlation ids from call context for structured logs."""
     if ctx is None:
         return {}
     out: dict[str, str] = {
@@ -46,6 +49,7 @@ def _payload_for_log(payload: Any) -> Any:
 
 
 def _response_body_for_log(response: httpx.Response) -> Any:
+    """Parse response body for logging with truncation."""
     ct = (response.headers.get("content-type") or "").lower()
     if "application/json" in ct:
         try:
@@ -59,10 +63,12 @@ def _response_body_for_log(response: httpx.Response) -> Any:
 
 
 def _orchestrator_url(settings: Settings, path: str) -> str:
+    """Build absolute orchestrator URL for log metadata."""
     return f"{settings.orchestrator_base_url.rstrip('/')}{path}"
 
 
 def _orchestrator_log_ts() -> str:
+    """Current Eastern ISO timestamp with microsecond precision."""
     return eastern_from_timestamp(time.time(), timespec="microseconds")
 
 
@@ -78,6 +84,7 @@ def _log_orchestrator_request(
     attempt: int | None = None,
     note: str | None = None,
 ) -> None:
+    """Emit structured ``orchestrator_api_request`` log line."""
     gateway_meta: dict[str, Any] = {
         "url": _orchestrator_url(settings, path),
         "orchestrator_contract": settings.orchestrator_contract,
@@ -121,6 +128,7 @@ def _log_orchestrator_response(
     attempt: int | None = None,
     note: str | None = None,
 ) -> None:
+    """Emit structured ``orchestrator_api_response`` log line."""
     gateway_meta: dict[str, Any] = {
         "url": _orchestrator_url(settings, path),
         "http_status_code": status_code,
@@ -163,10 +171,12 @@ class OrchestratorClient:
     """Transport adapter responsible for orchestrator chat calls."""
 
     def __init__(self, client: httpx.AsyncClient, settings: Settings):
+        """Bind shared httpx client and gateway settings."""
         self._client = client
         self._settings = settings
 
     def _flat_headers(self, ctx: OrchestratorCallContext) -> dict[str, str]:
+        """Build X-* header map for flat_headers orchestrator contract."""
         h: dict[str, str] = {
             "X-Session-Id": ctx.session_id,
             "X-Request-Id": ctx.request_id,
@@ -181,6 +191,7 @@ class OrchestratorClient:
         return h
 
     def _flat_json_body(self, payload: OrchestratorChatRequest, ctx: OrchestratorCallContext) -> dict[str, Any]:
+        """Build minimal JSON body for flat_headers chat POST."""
         body: dict[str, Any] = {"question": payload.input.question, "stream": ctx.stream}
         if ctx.conversation_id:
             body["conversation_id"] = ctx.conversation_id
@@ -197,6 +208,7 @@ class OrchestratorClient:
     async def _chat_gateway_json(
         self, payload: OrchestratorChatRequest, ctx: OrchestratorCallContext | None = None
     ) -> OrchestratorChatResponse:
+        """POST full gateway_json body with retries and mapped HTTP errors."""
         path = self._settings.orchestrator_chat_path
         body = payload.model_dump()
         last_error: Exception | None = None
@@ -282,6 +294,7 @@ class OrchestratorClient:
         raise HTTPException(status_code=502, detail=f"Orchestrator error: {last_error}")
 
     async def _chat_flat(self, payload: OrchestratorChatRequest, ctx: OrchestratorCallContext) -> OrchestratorChatResponse:
+        """POST flat headers + JSON body with retries."""
         flat_ctx = OrchestratorCallContext(
             session_id=ctx.session_id,
             request_id=ctx.request_id,
@@ -393,6 +406,7 @@ class OrchestratorClient:
     async def _stream_chat_gateway_json(
         self, payload: OrchestratorChatRequest, ctx: OrchestratorCallContext
     ) -> AsyncGenerator[str, None]:
+        """Stream NDJSON/SSE from orchestrator and map to gateway token events."""
         path = self._settings.orchestrator_chat_path
         body = payload.model_dump()
         try:
@@ -482,6 +496,7 @@ class OrchestratorClient:
     async def _stream_chat_flat(
         self, payload: OrchestratorChatRequest, ctx: OrchestratorCallContext
     ) -> AsyncGenerator[str, None]:
+        """Stream flat_headers SSE and enrich terminal done metadata."""
         flat_ctx = OrchestratorCallContext(
             session_id=ctx.session_id,
             request_id=ctx.request_id,
@@ -566,6 +581,7 @@ class OrchestratorClient:
         """When upstream SSE omits ``citations`` / ``follow_up_questions``, fetch them via non-stream JSON."""
 
         async def _fetch() -> tuple[list[dict[str, Any]], list[str]]:
+            """Run one non-stream chat to fetch citations and follow-ups."""
             non_stream_ctx = OrchestratorCallContext(
                 session_id=stream_ctx.session_id,
                 request_id=stream_ctx.request_id,
@@ -684,10 +700,12 @@ def _orchestrator_sse_ndjson_type(raw: str) -> tuple[str | None, dict[str, Any] 
 
 
 def _format_rewrite_sse_chunk(text: str) -> str:
+    """Format one gateway ``rewrite`` SSE event."""
     return f"event: rewrite\ndata: {json.dumps({'text': text})}\n\n"
 
 
 def _token_text_from_sse_data(raw: str) -> str:
+    """Extract display text from upstream SSE data line."""
     if not raw.strip():
         return ""
     try:
@@ -713,6 +731,7 @@ def _token_text_from_sse_data(raw: str) -> str:
 
 
 def _done_body_from_orchestrator_result(result: OrchestratorChatResponse) -> dict[str, Any]:
+    """Build gateway done payload from non-stream orchestrator result."""
     body: dict[str, Any] = {"status": "success"}
     if result.rewrite:
         body["rewrite"] = result.rewrite
@@ -724,6 +743,7 @@ def _done_body_from_orchestrator_result(result: OrchestratorChatResponse) -> dic
 
 
 def _parse_done_sse_chunk(chunk: str) -> dict[str, Any] | None:
+    """Parse ``event: done`` data JSON from one SSE chunk."""
     for line in chunk.splitlines():
         if line.startswith("data:"):
             raw = line[5:].strip()
@@ -738,6 +758,7 @@ def _parse_done_sse_chunk(chunk: str) -> dict[str, Any] | None:
 
 
 def _format_done_sse_chunk(done_body: dict[str, Any]) -> str:
+    """Format one gateway ``done`` SSE event."""
     return f"event: done\ndata: {json.dumps(done_body)}\n\n"
 
 

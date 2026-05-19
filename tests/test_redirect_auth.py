@@ -1,3 +1,5 @@
+"""Tests for password-reset redirect allowlist resolution."""
+
 import pytest
 from fastapi import HTTPException
 
@@ -7,6 +9,7 @@ from app.services.redirect_auth import resolve_password_reset_redirect
 
 @pytest.fixture(autouse=True)
 def _capture_redirect_logs(monkeypatch):
+    """Record ``log_event`` calls from redirect_auth for assertions."""
     events: list[tuple[str, dict]] = []
 
     def _log_event(event: str, **fields):

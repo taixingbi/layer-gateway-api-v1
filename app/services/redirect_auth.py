@@ -1,3 +1,5 @@
+"""Allowlist validation for Supabase password-reset ``redirect_to`` URLs."""
+
 from urllib.parse import urlparse
 
 from fastapi import HTTPException
@@ -9,6 +11,7 @@ RESET_PASSWORD_PATH = "/auth/reset-password"
 
 
 def _origin(url: str) -> str:
+    """Parse ``scheme://netloc`` from a URL; raise 400 if invalid."""
     parsed = urlparse(url.strip())
     if not parsed.scheme or not parsed.netloc:
         raise HTTPException(status_code=400, detail="Invalid URL")
@@ -16,6 +19,7 @@ def _origin(url: str) -> str:
 
 
 def redirect_origin_allowlist(settings: Settings) -> set[str]:
+    """Origins allowed for ``redirect_to`` from ``FRONTEND_URL`` and ``ADDITIONAL_FRONTEND_URLS``."""
     origins: set[str] = set()
     for raw in (settings.frontend_url, *settings.additional_frontend_urls.split(",")):
         part = (raw or "").strip()
@@ -31,7 +35,7 @@ def redirect_origin_allowlist(settings: Settings) -> set[str]:
 
 
 def resolve_password_reset_redirect(settings: Settings, override: str | None = None) -> str:
-    """Build allowlisted redirect URL for Supabase reset emails."""
+    """Build allowlisted redirect URL for Supabase reset emails and log resolve/reject events."""
     default = f"{settings.frontend_url.rstrip('/')}{RESET_PASSWORD_PATH}"
     if not override or not override.strip():
         log_event(

@@ -30,6 +30,7 @@ def _emit_request_complete(
     ttfb_ms: float | None,
     stream: bool,
 ) -> None:
+    """Emit ``request_complete`` log line and update Prometheus histograms."""
     settings = get_settings()
     session_id = getattr(request.state, "session_id", None)
     conversation_id = getattr(request.state, "conversation_id", None)
@@ -65,6 +66,7 @@ class StructuredAccessLogMiddleware(BaseHTTPMiddleware):
     """Log ``request_complete``; for SSE, measure TTFB and total stream time."""
 
     async def dispatch(self, request: Request, call_next) -> Response:
+        """Measure latency (and TTFB for SSE) after the response completes."""
         start = time.perf_counter()
         response = await call_next(request)
 
@@ -72,6 +74,7 @@ class StructuredAccessLogMiddleware(BaseHTTPMiddleware):
             body = response.body_iterator
 
             async def logging_wrapper():
+                """Stream body while recording TTFB and total latency on close."""
                 try:
                     async for chunk in body:
                         if await request.is_disconnected():

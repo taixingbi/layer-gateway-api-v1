@@ -1,3 +1,5 @@
+"""Profile-derived user claims for JWT metadata and orchestrator auth."""
+
 from dataclasses import dataclass
 
 from app.services.auth_roles import normalize_roles
@@ -5,6 +7,8 @@ from app.services.auth_roles import normalize_roles
 
 @dataclass
 class UserClaims:
+    """Identity and RBAC fields mirrored from Supabase profile."""
+
     user_id: str
     email: str | None
     roles: list[str]
@@ -13,6 +17,7 @@ class UserClaims:
     plan: str
 
     def to_jwt_claims(self) -> dict:
+        """Serialize claims for JWT user_metadata."""
         return {
             "sub": self.user_id,
             "email": self.email or "",
@@ -23,6 +28,7 @@ class UserClaims:
         }
 
     def to_user_dict(self) -> dict:
+        """Flatten claims for API responses."""
         claims = self.to_jwt_claims()
         return {
             "user_id": self.user_id,
