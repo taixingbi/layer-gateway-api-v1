@@ -47,6 +47,17 @@ _EVENT_PHASE: dict[str, str] = {
     "logger_configured": "system",
     "password_reset_redirect_resolved": "auth",
     "password_reset_redirect_rejected": "auth",
+    "password_reset_email_sent": "auth",
+    "password_reset_email_failed": "auth",
+    "password_reset_completed": "auth",
+    "password_reset_failed": "auth",
+    "auth_login_succeeded": "auth",
+    "auth_login_failed": "auth",
+    "auth_signup_succeeded": "auth",
+    "auth_signup_failed": "auth",
+    "auth_refresh_succeeded": "auth",
+    "auth_refresh_failed": "auth",
+    "auth_change_password_completed": "auth",
 }
 
 _EVENT_MESSAGE: dict[str, str] = {
@@ -64,6 +75,17 @@ _EVENT_MESSAGE: dict[str, str] = {
     "logger_configured": "Logger configured",
     "password_reset_redirect_resolved": "Password reset redirect resolved",
     "password_reset_redirect_rejected": "Password reset redirect rejected",
+    "password_reset_email_sent": "Password reset email sent",
+    "password_reset_email_failed": "Password reset email failed",
+    "password_reset_completed": "Password reset completed",
+    "password_reset_failed": "Password reset failed",
+    "auth_login_succeeded": "Auth login succeeded",
+    "auth_login_failed": "Auth login failed",
+    "auth_signup_succeeded": "Auth signup succeeded",
+    "auth_signup_failed": "Auth signup failed",
+    "auth_refresh_succeeded": "Auth refresh succeeded",
+    "auth_refresh_failed": "Auth refresh failed",
+    "auth_change_password_completed": "Auth change password completed",
 }
 
 _LEVEL_NUM: dict[str, int] = {

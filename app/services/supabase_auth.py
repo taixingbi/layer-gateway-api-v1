@@ -9,6 +9,7 @@ from app.services.profile_service import (
     resolve_login_email,
     user_to_claims,
 )
+from app.services.auth_log import log_auth_event, mask_email, mask_identifier
 from app.services.supabase_client import require_supabase
 from app.services.time_util import format_unix_est
 from app.services.user_meta import meta_get
@@ -76,25 +77,77 @@ def verify_access_token_to_auth_context(access_token: str, settings: Settings | 
 
 def signup(email: str, password: str) -> dict:
     supabase = require_supabase()
-    response = supabase.auth.sign_up({"email": email, "password": password})
+    try:
+        response = supabase.auth.sign_up({"email": email, "password": password})
+    except Exception as exc:
+        log_auth_event(
+            "auth_signup_failed",
+            level="WARN",
+            email_masked=mask_email(email),
+            error=str(exc),
+        )
+        raise _auth_error(exc, "Signup failed") from exc
     if response.user is None:
+        log_auth_event(
+            "auth_signup_failed",
+            level="WARN",
+            email_masked=mask_email(email),
+            reason="no_user",
+        )
         raise HTTPException(status_code=400, detail="Signup failed")
 
     claims = user_to_claims(response.user)
     payload = _session_payload(response.session, claims)
     payload["email_confirmation_required"] = response.session is None
+    log_auth_event(
+        "auth_signup_succeeded",
+        email_masked=mask_email(email),
+        email_confirmation_required=payload["email_confirmation_required"],
+        session_created=response.session is not None,
+    )
     return payload
 
 
 def login(identifier: str, password: str) -> dict:
     supabase = require_supabase()
-    email = resolve_login_email(identifier)
-    response = supabase.auth.sign_in_with_password({"email": email, "password": password})
+    id_masked = mask_identifier(identifier)
+    try:
+        email = resolve_login_email(identifier)
+        response = supabase.auth.sign_in_with_password({"email": email, "password": password})
+    except HTTPException as exc:
+        log_auth_event(
+            "auth_login_failed",
+            level="WARN",
+            identifier_masked=id_masked,
+            status=exc.status_code,
+            detail=str(exc.detail),
+        )
+        raise
+    except Exception as exc:
+        log_auth_event(
+            "auth_login_failed",
+            level="WARN",
+            identifier_masked=id_masked,
+            error=str(exc),
+        )
+        raise _auth_error(exc, "Login failed") from exc
     if not response.session or not response.user:
+        log_auth_event(
+            "auth_login_failed",
+            level="WARN",
+            identifier_masked=id_masked,
+            reason="no_session",
+        )
         raise HTTPException(status_code=401, detail="Invalid login credentials")
 
     row = fetch_profile_row(response.session.access_token, response.user.id)
-    return _session_payload(response.session, user_to_claims(response.user, row))
+    payload = _session_payload(response.session, user_to_claims(response.user, row))
+    log_auth_event(
+        "auth_login_succeeded",
+        identifier_masked=id_masked,
+        user_id=response.user.id,
+    )
+    return payload
 
 
 def refresh_session(refresh_token: str) -> dict:
@@ -102,13 +155,17 @@ def refresh_session(refresh_token: str) -> dict:
     try:
         response = supabase.auth.refresh_session(refresh_token)
     except Exception as exc:
+        log_auth_event("auth_refresh_failed", level="WARN", error=str(exc))
         raise HTTPException(status_code=401, detail="Invalid refresh token") from exc
 
     if not response.session or not response.user:
+        log_auth_event("auth_refresh_failed", level="WARN", reason="no_session")
         raise HTTPException(status_code=401, detail="Invalid refresh token")
 
     row = fetch_profile_row(response.session.access_token, response.user.id)
-    return _session_payload(response.session, user_to_claims(response.user, row))
+    payload = _session_payload(response.session, user_to_claims(response.user, row))
+    log_auth_event("auth_refresh_succeeded", user_id=response.user.id)
+    return payload
 
 
 def _auth_error(exc: Exception, default: str = "Request failed") -> HTTPException:
@@ -146,13 +203,26 @@ def forgot_password(email: str, redirect_to: str | None = None) -> dict:
 
     settings = get_settings()
     supabase = require_supabase()
+    email_masked = mask_email(email)
     target = resolve_password_reset_redirect(settings, redirect_to)
     options = {"redirect_to": target}
     try:
         # redirect_to must be allowlisted in Supabase Dashboard → Auth → URL configuration.
         supabase.auth.reset_password_for_email(email.strip(), options)
     except Exception as exc:
+        log_auth_event(
+            "password_reset_email_failed",
+            level="WARN",
+            email_masked=email_masked,
+            redirect_to=target,
+            error=str(exc),
+        )
         raise _auth_error(exc, "Could not send reset email") from exc
+    log_auth_event(
+        "password_reset_email_sent",
+        email_masked=email_masked,
+        redirect_to=target,
+    )
     return {
         "message": "If an account exists for that email, a password reset link was sent.",
         "redirect_to": target,
@@ -161,15 +231,41 @@ def forgot_password(email: str, redirect_to: str | None = None) -> dict:
 
 def reset_password(access_token: str, new_password: str, refresh_token: str | None = None) -> dict:
     supabase = require_supabase()
+    has_refresh = bool(refresh_token)
     try:
         user_resp = supabase.auth.get_user(access_token)
     except Exception as exc:
+        log_auth_event(
+            "password_reset_failed",
+            level="WARN",
+            reason="invalid_token",
+            has_refresh_token=has_refresh,
+            error=str(exc),
+        )
         raise HTTPException(status_code=401, detail="Invalid or expired reset link") from exc
 
     if not user_resp or not user_resp.user:
+        log_auth_event(
+            "password_reset_failed",
+            level="WARN",
+            reason="no_user",
+            has_refresh_token=has_refresh,
+        )
         raise HTTPException(status_code=401, detail="Invalid or expired reset link")
 
-    _update_password_with_token(access_token, new_password)
+    user_id = user_resp.user.id
+    try:
+        _update_password_with_token(access_token, new_password)
+    except HTTPException as exc:
+        log_auth_event(
+            "password_reset_failed",
+            level="WARN",
+            user_id=user_id,
+            reason="update_password",
+            status=exc.status_code,
+            has_refresh_token=has_refresh,
+        )
+        raise
 
     if refresh_token:
         try:
@@ -179,14 +275,34 @@ def reset_password(access_token: str, new_password: str, refresh_token: str | No
                 {"access_token": access_token, "refresh_token": refresh_token}
             )
         except Exception as exc:
+            log_auth_event(
+                "password_reset_failed",
+                level="WARN",
+                user_id=user_id,
+                reason="set_session",
+                has_refresh_token=True,
+                error=str(exc),
+            )
             raise _auth_error(exc, "Password updated but session failed") from exc
 
         if session_resp.session and session_resp.user:
             row = fetch_profile_row(session_resp.session.access_token, session_resp.user.id)
             payload = _session_payload(session_resp.session, user_to_claims(session_resp.user, row))
             payload["message"] = "Password updated successfully."
+            log_auth_event(
+                "password_reset_completed",
+                user_id=user_id,
+                session_created=True,
+                has_refresh_token=True,
+            )
             return payload
 
+    log_auth_event(
+        "password_reset_completed",
+        user_id=user_id,
+        session_created=False,
+        has_refresh_token=has_refresh,
+    )
     return {"message": "Password updated successfully. You can log in now."}
 
 
@@ -205,10 +321,20 @@ def change_password(access_token: str, new_password: str, refresh_token: str | N
             row = fetch_profile_row(refreshed.session.access_token, refreshed.user.id)
             payload = _session_payload(refreshed.session, user_to_claims(refreshed.user, row))
             payload["message"] = "Password updated successfully."
+            log_auth_event(
+                "auth_change_password_completed",
+                user_id=claims.user_id,
+                session_refreshed=True,
+            )
             return payload
 
     row = fetch_profile_row(access_token, claims.user_id)
     user_resp = supabase.auth.get_user(access_token)
+    log_auth_event(
+        "auth_change_password_completed",
+        user_id=claims.user_id,
+        session_refreshed=False,
+    )
     if user_resp and user_resp.user:
         return {
             "message": "Password updated successfully.",
