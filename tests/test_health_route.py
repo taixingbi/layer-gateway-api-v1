@@ -8,6 +8,7 @@ from app.services.orchestrator_client import OrchestratorClient
 
 
 def test_health_ok_without_auth():
+    """Health ok without auth."""
     app = create_app()
     with TestClient(app) as client:
         response = client.get("/health")
@@ -16,11 +17,13 @@ def test_health_ok_without_auth():
 
 
 def test_ready_ok_without_auth_when_upstream_healthy():
+    """Ready ok without auth when upstream healthy."""
     import asyncio
 
     import httpx
 
     async def handler(request: httpx.Request) -> httpx.Response:
+        """Handler."""
         if request.method == "GET" and request.url.path == "/health":
             return httpx.Response(200, json={"status": "ok"})
         return httpx.Response(404)
@@ -49,11 +52,13 @@ def test_ready_ok_without_auth_when_upstream_healthy():
 
 
 def test_ready_503_when_upstream_unhealthy():
+    """Ready 503 when upstream unhealthy."""
     import asyncio
 
     import httpx
 
     async def handler(request: httpx.Request) -> httpx.Response:
+        """Handler."""
         return httpx.Response(503, json={"error": "down"})
 
     transport = httpx.MockTransport(handler)
@@ -76,6 +81,7 @@ def test_ready_503_when_upstream_unhealthy():
 
 
 def test_ready_probe_disabled_returns_200(monkeypatch):
+    """Ready probe disabled returns 200."""
     monkeypatch.setenv("ORCHESTRATOR_READINESS_PROBE_ENABLED", "false")
     get_settings.cache_clear()
     app = create_app()

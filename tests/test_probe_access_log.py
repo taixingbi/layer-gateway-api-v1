@@ -8,6 +8,7 @@ from app.main import create_app
 
 
 def _request_complete_kwargs(mock_log_event):
+    """Request complete kwargs."""
     for call in mock_log_event.call_args_list:
         if call.args and call.args[0] == "request_complete":
             return call.kwargs
@@ -40,6 +41,7 @@ def test_health_request_complete_with_optional_headers_still_omits_probe_correla
 
 
 def test_health_request_complete_mints_ids_when_headers_absent():
+    """Health request complete mints ids when headers absent."""
     with patch("app.middleware.access_log.log_event") as mock_log:
         app = create_app()
         with TestClient(app) as client:
@@ -56,6 +58,7 @@ def test_health_request_complete_mints_ids_when_headers_absent():
 
 
 def test_metrics_request_complete_includes_correlation_fields():
+    """Metrics request complete includes correlation fields."""
     with patch("app.middleware.access_log.log_event") as mock_log:
         app = create_app()
         with TestClient(app) as client:

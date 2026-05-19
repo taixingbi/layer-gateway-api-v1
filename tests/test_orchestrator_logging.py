@@ -26,6 +26,7 @@ from app.services.orchestrator_client import (
 
 
 def _flat_payload() -> OrchestratorChatRequest:
+    """Flat payload."""
     history = [
         ChatHistoryMessage(role="user", content="What is Taixing Bi US visa status?"),
         ChatHistoryMessage(role="assistant", content="Taixing has H4 EAD."),
@@ -47,6 +48,7 @@ def _flat_payload() -> OrchestratorChatRequest:
 
 
 def _ctx() -> OrchestratorCallContext:
+    """Ctx."""
     return OrchestratorCallContext(
         session_id="sess_123",
         request_id="req_demo_001",
@@ -62,6 +64,7 @@ def _ctx() -> OrchestratorCallContext:
 
 @pytest.mark.asyncio
 async def test_orchestrator_api_logs_use_gateway_meta_shape():
+    """Orchestrator api logs use gateway meta shape."""
     settings = Settings(
         orchestrator_retry_max_attempts=1,
         orchestrator_contract="flat_headers",
@@ -71,9 +74,11 @@ async def test_orchestrator_api_logs_use_gateway_meta_shape():
     captured: list[dict] = []
 
     def capture_log(event: str, **fields):
+        """Capture log."""
         captured.append({"event": event, **fields})
 
     async def handler(request: httpx.Request):
+        """Handler."""
         body = json.loads(request.content.decode())
         assert "history" in body
         return httpx.Response(

@@ -10,10 +10,12 @@ from app.core.logging import EasternJsonFormatter, GATEWAY_LOGGER_NAME, LOG_FIEL
 
 @pytest.fixture
 def formatter() -> EasternJsonFormatter:
+    """Formatter."""
     return EasternJsonFormatter()
 
 
 def test_eastern_json_formatter_standard_shape(formatter: EasternJsonFormatter) -> None:
+    """Eastern json formatter standard shape."""
     record = logging.LogRecord(
         name=GATEWAY_LOGGER_NAME,
         level=logging.INFO,
@@ -57,6 +59,7 @@ def test_eastern_json_formatter_standard_shape(formatter: EasternJsonFormatter) 
 
 
 def test_log_event_orchestrator_api_request_shape(capsys) -> None:
+    """Log event orchestrator api request shape."""
     from app.core.logging import configure_logging, log_event
 
     configure_logging("test")

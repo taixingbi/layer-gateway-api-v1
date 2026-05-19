@@ -46,9 +46,11 @@ def _ctx(stream: bool = False, conversation_id: str | None = None) -> Orchestrat
 
 @pytest.mark.asyncio
 async def test_timeout_maps_to_504():
+    """Timeout maps to 504."""
     settings = Settings(orchestrator_retry_max_attempts=1)
 
     async def handler(request):
+        """Handler."""
         raise httpx.TimeoutException("timeout")
 
     transport = httpx.MockTransport(handler)
@@ -61,9 +63,11 @@ async def test_timeout_maps_to_504():
 
 @pytest.mark.asyncio
 async def test_server_error_maps_to_502():
+    """Server error maps to 502."""
     settings = Settings(orchestrator_retry_max_attempts=1)
 
     async def handler(request):
+        """Handler."""
         return httpx.Response(500, json={"error": "failed"})
 
     transport = httpx.MockTransport(handler)
@@ -76,6 +80,7 @@ async def test_server_error_maps_to_502():
 
 @pytest.mark.asyncio
 async def test_flat_headers_chat_posts_headers_and_flat_json():
+    """Flat headers chat posts headers and flat json."""
     settings = Settings(
         orchestrator_retry_max_attempts=1,
         orchestrator_contract="flat_headers",
@@ -84,6 +89,7 @@ async def test_flat_headers_chat_posts_headers_and_flat_json():
     captured: dict = {}
 
     async def handler(request: httpx.Request):
+        """Handler."""
         captured["headers"] = dict(request.headers)
         captured["body"] = json.loads(request.content.decode())
         assert request.url.path == "/orchestrator/answer"
@@ -108,6 +114,7 @@ async def test_flat_headers_chat_posts_headers_and_flat_json():
 
 @pytest.mark.asyncio
 async def test_flat_headers_sends_conversation_id_when_set():
+    """Flat headers sends conversation id when set."""
     settings = Settings(
         orchestrator_retry_max_attempts=1,
         orchestrator_contract="flat_headers",
@@ -116,6 +123,7 @@ async def test_flat_headers_sends_conversation_id_when_set():
     captured: dict = {}
 
     async def handler(request: httpx.Request):
+        """Handler."""
         captured["headers"] = dict(request.headers)
         captured["body"] = json.loads(request.content.decode())
         return httpx.Response(200, json={"answer": "ok", "citations": [], "usage": {}})
@@ -131,6 +139,7 @@ async def test_flat_headers_sends_conversation_id_when_set():
 
 @pytest.mark.asyncio
 async def test_flat_headers_sends_history_when_set():
+    """Flat headers sends history when set."""
     settings = Settings(
         orchestrator_retry_max_attempts=1,
         orchestrator_contract="flat_headers",
@@ -146,6 +155,7 @@ async def test_flat_headers_sends_history_when_set():
     ]
 
     async def handler(request: httpx.Request):
+        """Handler."""
         captured["body"] = json.loads(request.content.decode())
         return httpx.Response(200, json={"answer": "ok", "citations": [], "usage": {}})
 
@@ -177,6 +187,7 @@ async def test_flat_headers_sends_history_when_set():
 
 @pytest.mark.asyncio
 async def test_flat_headers_stream_parses_sse_tokens():
+    """Flat headers stream parses sse tokens."""
     settings = Settings(
         orchestrator_retry_max_attempts=1,
         orchestrator_contract="flat_headers",
@@ -185,6 +196,7 @@ async def test_flat_headers_stream_parses_sse_tokens():
     sse = b'data: {"text":"Hello"}\n\ndata: {"token":" world"}\n\n'
 
     async def handler(request: httpx.Request):
+        """Handler."""
         body = json.loads(request.content.decode())
         if body.get("stream"):
             assert request.headers.get("accept") == "text/event-stream"
@@ -205,6 +217,7 @@ async def test_flat_headers_stream_parses_sse_tokens():
     import json as json_mod
 
     def _token_text(chunk: str) -> str:
+        """Token text."""
         line = [ln for ln in chunk.splitlines() if ln.startswith("data:")][0]
         return json_mod.loads(line[len("data:") :].strip())["text"]
 
@@ -215,6 +228,7 @@ async def test_flat_headers_stream_parses_sse_tokens():
 
 @pytest.mark.asyncio
 async def test_flat_headers_stream_forwards_upstream_done_event():
+    """Flat headers stream forwards upstream done event."""
     settings = Settings(
         orchestrator_retry_max_attempts=1,
         orchestrator_contract="flat_headers",
@@ -233,6 +247,7 @@ async def test_flat_headers_stream_forwards_upstream_done_event():
     )
 
     async def handler(request: httpx.Request):
+        """Handler."""
         return httpx.Response(200, content=sse, headers={"content-type": "text/event-stream"})
 
     transport = httpx.MockTransport(handler)
@@ -274,6 +289,7 @@ async def test_flat_headers_stream_rag_events_aggregate_into_gateway_done():
     )
 
     async def handler(request: httpx.Request):
+        """Handler."""
         return httpx.Response(200, content=sse, headers={"content-type": "text/event-stream"})
 
     transport = httpx.MockTransport(handler)
@@ -314,6 +330,7 @@ async def test_flat_headers_stream_orchestrator_rewrite_not_emitted_as_token():
     }
 
     async def handler(request: httpx.Request):
+        """Handler."""
         body = json.loads(request.content.decode())
         if body.get("stream"):
             return httpx.Response(200, content=sse, headers={"content-type": "text/event-stream"})
@@ -338,6 +355,7 @@ async def test_flat_headers_stream_orchestrator_rewrite_not_emitted_as_token():
 
 @pytest.mark.asyncio
 async def test_chat_flat_non_stream_passes_rewrite():
+    """Chat flat non stream passes rewrite."""
     settings = Settings(
         orchestrator_retry_max_attempts=1,
         orchestrator_contract="flat_headers",
@@ -345,6 +363,7 @@ async def test_chat_flat_non_stream_passes_rewrite():
     )
 
     async def handler(request: httpx.Request):
+        """Handler."""
         return httpx.Response(
             200,
             json={
@@ -382,6 +401,7 @@ async def test_flat_headers_stream_supplements_metadata_when_sse_lacks_citations
     }
 
     async def handler(request: httpx.Request):
+        """Handler."""
         body = json.loads(request.content.decode())
         if body.get("stream"):
             return httpx.Response(200, content=stream_sse, headers={"content-type": "text/event-stream"})
@@ -400,6 +420,7 @@ async def test_flat_headers_stream_supplements_metadata_when_sse_lacks_citations
 
 @pytest.mark.asyncio
 async def test_gateway_json_stream_appends_done_with_metadata_from_non_stream():
+    """Gateway json stream appends done with metadata from non stream."""
     settings = Settings(
         orchestrator_retry_max_attempts=1,
         orchestrator_contract="gateway_json",
@@ -415,6 +436,7 @@ async def test_gateway_json_stream_appends_done_with_metadata_from_non_stream():
     calls = {"stream": 0, "json": 0}
 
     async def handler(request: httpx.Request):
+        """Handler."""
         if request.headers.get("accept") == "text/event-stream":
             calls["stream"] += 1
             return httpx.Response(200, content=stream_lines, headers={"content-type": "application/x-ndjson"})

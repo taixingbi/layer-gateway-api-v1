@@ -13,6 +13,7 @@ def _capture_redirect_logs(monkeypatch):
     events: list[tuple[str, dict]] = []
 
     def _log_event(event: str, **fields):
+        """Log event."""
         events.append((event, fields))
 
     monkeypatch.setattr("app.services.redirect_auth.log_event", _log_event)
@@ -20,6 +21,7 @@ def _capture_redirect_logs(monkeypatch):
 
 
 def test_default_reset_redirect(_capture_redirect_logs):
+    """Default reset redirect."""
     settings = Settings(frontend_url="http://192.168.86.179:30186")
     assert (
         resolve_password_reset_redirect(settings, None)
@@ -30,6 +32,7 @@ def test_default_reset_redirect(_capture_redirect_logs):
 
 
 def test_override_when_origin_allowed(_capture_redirect_logs):
+    """Override when origin allowed."""
     settings = Settings(frontend_url="http://192.168.86.179:30186")
     url = "http://192.168.86.179:30186/auth/reset-password"
     assert resolve_password_reset_redirect(settings, url) == url
@@ -38,6 +41,7 @@ def test_override_when_origin_allowed(_capture_redirect_logs):
 
 
 def test_override_rejected_for_unknown_origin(_capture_redirect_logs):
+    """Override rejected for unknown origin."""
     settings = Settings(frontend_url="http://localhost:3000")
     with pytest.raises(HTTPException) as exc:
         resolve_password_reset_redirect(

@@ -18,6 +18,7 @@ class _StubOrch:
     """Minimal orchestrator stub for JWT integration tests."""
 
     async def chat(self, payload, ctx=None):
+        """Chat."""
         return type(
             "R",
             (),
@@ -25,6 +26,7 @@ class _StubOrch:
         )()
 
     async def stream_chat(self, payload, ctx=None):
+        """Stream chat."""
         yield 'event: token\ndata: {"text":"x"}\n\n'
 
 
@@ -32,9 +34,11 @@ class _StaticJwkClient:
     """Return a fixed signing key for JwtValidator tests."""
 
     def __init__(self, signing_key):
+        """Init."""
         self._signing_key = signing_key
 
     def get_signing_key_from_jwt(self, token: str):
+        """Get signing key from jwt."""
         return self._signing_key
 
 
@@ -50,6 +54,7 @@ def _rsa_keypair_and_jwk():
 
 
 def test_claims_to_auth_context_maps_standard_claims():
+    """Claims to auth context maps standard claims."""
     settings = Settings()
     claims = {
         "sub": "user-1",
@@ -67,6 +72,7 @@ def test_claims_to_auth_context_maps_standard_claims():
 
 
 def test_claims_to_auth_context_default_roles_and_tenant():
+    """Claims to auth context default roles and tenant."""
     settings = Settings(auth_jwt_default_tenant_id="fallback-tenant")
     claims = {"sub": "u2", "exp": 9999999999}
     ctx = claims_to_auth_context(claims, settings)
@@ -78,12 +84,14 @@ def test_claims_to_auth_context_default_roles_and_tenant():
 
 
 def test_claims_to_auth_context_missing_sub_raises():
+    """Claims to auth context missing sub raises."""
     settings = Settings()
     with pytest.raises(JwtVerifyError):
         claims_to_auth_context({"tenant_id": "x"}, settings)
 
 
 def test_settings_jwt_mode_requires_issuer_audience_jwks():
+    """Settings jwt mode requires issuer audience jwks."""
     with pytest.raises(ValueError, match="AUTH_JWT"):
         Settings(
             auth_mode="jwt",
@@ -123,6 +131,7 @@ def _mint_token(private_key, **extra) -> str:
 
 
 def test_chat_accepts_valid_jwt(jwt_env):
+    """Chat accepts valid jwt."""
     private_key, py_jwk = _rsa_keypair_and_jwk()
     token = _mint_token(private_key)
     app = create_app()
@@ -139,6 +148,7 @@ def test_chat_accepts_valid_jwt(jwt_env):
 
 
 def test_chat_rejects_expired_jwt(jwt_env):
+    """Chat rejects expired jwt."""
     private_key, py_jwk = _rsa_keypair_and_jwk()
     now = int(time.time())
     token = jwt.encode(
@@ -167,6 +177,7 @@ def test_chat_rejects_expired_jwt(jwt_env):
 
 
 def test_chat_rejects_wrong_audience_jwt(jwt_env):
+    """Chat rejects wrong audience jwt."""
     private_key, py_jwk = _rsa_keypair_and_jwk()
     token = _mint_token(private_key, aud="other-api")
     app = create_app()
@@ -182,6 +193,7 @@ def test_chat_rejects_wrong_audience_jwt(jwt_env):
 
 
 def test_jwt_validator_accepts_multi_audience_setting(monkeypatch):
+    """Jwt validator accepts multi audience setting."""
     monkeypatch.setenv("AUTH_MODE", "jwt")
     monkeypatch.setenv("AUTH_JWT_ISSUER", "https://issuer.test/")
     monkeypatch.setenv("AUTH_JWT_AUDIENCE", "api-a, api-b")

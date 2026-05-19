@@ -6,6 +6,7 @@ from app.main import create_app
 
 
 def test_metrics_endpoint_unauthenticated():
+    """Metrics endpoint unauthenticated."""
     app = create_app()
     with TestClient(app) as client:
         response = client.get("/metrics")

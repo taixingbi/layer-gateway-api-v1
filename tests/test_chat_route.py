@@ -13,12 +13,14 @@ class CapturingOrchestratorStub:
     """Records last ``chat`` / ``stream_chat`` arguments for contract assertions."""
 
     def __init__(self):
+        """Init."""
         self.chat_payload = None
         self.chat_ctx: OrchestratorCallContext | None = None
         self.stream_payload = None
         self.stream_ctx: OrchestratorCallContext | None = None
 
     async def chat(self, payload, ctx=None):
+        """Chat."""
         self.chat_payload = payload
         self.chat_ctx = ctx
         return type(
@@ -33,6 +35,7 @@ class CapturingOrchestratorStub:
         )()
 
     async def stream_chat(self, payload, ctx=None):
+        """Stream chat."""
         self.stream_payload = payload
         self.stream_ctx = ctx
         yield 'event: token\ndata: {"text":"x"}\n\n'
@@ -42,6 +45,7 @@ class StubOrchestratorClient:
     """Returns fixed non-stream answer for happy-path chat tests."""
 
     async def chat(self, payload, ctx=None):
+        """Chat."""
         return type(
             "Resp",
             (),
@@ -54,6 +58,7 @@ class StubOrchestratorClient:
         )()
 
     async def stream_chat(self, payload, ctx=None):
+        """Stream chat."""
         yield 'event: token\ndata: {"text":"Hello"}\n\n'
         yield 'event: token\ndata: {"text":" world"}\n\n'
 
@@ -66,6 +71,7 @@ def _auth_headers():
 class StubOrchestratorWithFollowUps:
     """Non-stream response including citations and follow-up questions."""
     async def chat(self, payload, ctx=None):
+        """Chat."""
         return type(
             "Resp",
             (),
@@ -81,14 +87,17 @@ class StubOrchestratorWithFollowUps:
         )()
 
     async def stream_chat(self, payload, ctx=None):
+        """Stream chat."""
         yield 'event: token\ndata: {"text":"Hi"}\n\n'
 
 
 def test_chat_forwards_rewrite_from_upstream():
+    """Chat forwards rewrite from upstream."""
     app = create_app()
 
     class StubWithRewrite:
         async def chat(self, payload, ctx=None):
+            """Chat."""
             return type(
                 "Resp",
                 (),
@@ -102,6 +111,7 @@ def test_chat_forwards_rewrite_from_upstream():
             )()
 
         async def stream_chat(self, payload, ctx=None):
+            """Stream chat."""
             yield 'event: token\ndata: {"text":"x"}\n\n'
 
     with TestClient(app) as client:
@@ -116,6 +126,7 @@ def test_chat_forwards_rewrite_from_upstream():
 
 
 def test_chat_forwards_follow_up_questions_from_upstream():
+    """Chat forwards follow up questions from upstream."""
     app = create_app()
     with TestClient(app) as client:
         app.state.orchestrator_client = StubOrchestratorWithFollowUps()
@@ -133,6 +144,7 @@ def test_chat_forwards_follow_up_questions_from_upstream():
 
 
 def test_chat_returns_stable_response_contract():
+    """Chat returns stable response contract."""
     app = create_app()
     with TestClient(app) as client:
         app.state.orchestrator_client = StubOrchestratorClient()
@@ -152,6 +164,7 @@ def test_chat_returns_stable_response_contract():
 
 
 def test_chat_uses_x_session_id_header_when_present():
+    """Chat uses x session id header when present."""
     app = create_app()
     with TestClient(app) as client:
         app.state.orchestrator_client = StubOrchestratorClient()
@@ -165,6 +178,7 @@ def test_chat_uses_x_session_id_header_when_present():
 
 
 def test_chat_rejects_session_id_in_json_body():
+    """Chat rejects session id in json body."""
     app = create_app()
     with TestClient(app) as client:
         app.state.orchestrator_client = StubOrchestratorClient()
@@ -177,6 +191,7 @@ def test_chat_rejects_session_id_in_json_body():
 
 
 def _kwargs_for_event(mock_log, event: str):
+    """Kwargs for event."""
     for call in mock_log.call_args_list:
         if call.args and call.args[0] == event:
             return call.kwargs
@@ -184,6 +199,7 @@ def _kwargs_for_event(mock_log, event: str):
 
 
 def test_chat_logs_and_request_complete_include_conversation_id_when_provided():
+    """Chat logs and request complete include conversation id when provided."""
     with patch("app.middleware.access_log.log_event") as access_mock, patch("app.routes.chat.log_event") as chat_mock:
         app = create_app()
         with TestClient(app) as client:
@@ -210,6 +226,7 @@ def test_chat_logs_and_request_complete_include_conversation_id_when_provided():
 
 
 def test_chat_passes_history_to_orchestrator_client():
+    """Chat passes history to orchestrator client."""
     app = create_app()
     stub = CapturingOrchestratorStub()
     history = [
@@ -234,6 +251,7 @@ def test_chat_passes_history_to_orchestrator_client():
 
 
 def test_chat_passes_conversation_id_to_orchestrator_client_from_json_body():
+    """Chat passes conversation id to orchestrator client from json body."""
     app = create_app()
     stub = CapturingOrchestratorStub()
     with TestClient(app) as client:
@@ -250,6 +268,7 @@ def test_chat_passes_conversation_id_to_orchestrator_client_from_json_body():
 
 
 def test_chat_passes_conversation_id_from_x_conversation_id_header():
+    """Chat passes conversation id from x conversation id header."""
     app = create_app()
     stub = CapturingOrchestratorStub()
     with TestClient(app) as client:
@@ -265,6 +284,7 @@ def test_chat_passes_conversation_id_from_x_conversation_id_header():
 
 
 def test_chat_x_conversation_id_header_overrides_json_body():
+    """Chat x conversation id header overrides json body."""
     app = create_app()
     stub = CapturingOrchestratorStub()
     with TestClient(app) as client:
@@ -280,6 +300,7 @@ def test_chat_x_conversation_id_header_overrides_json_body():
 
 
 def test_chat_stream_passes_conversation_id_on_ctx():
+    """Chat stream passes conversation id on ctx."""
     app = create_app()
     stub = CapturingOrchestratorStub()
     with TestClient(app) as client:
@@ -296,6 +317,7 @@ def test_chat_stream_passes_conversation_id_on_ctx():
 
 
 def test_chat_rejects_short_x_conversation_id():
+    """Chat rejects short x conversation id."""
     app = create_app()
     with TestClient(app) as client:
         app.state.orchestrator_client = StubOrchestratorClient()
@@ -308,6 +330,7 @@ def test_chat_rejects_short_x_conversation_id():
 
 
 def test_chat_rejects_short_x_session_id():
+    """Chat rejects short x session id."""
     app = create_app()
     with TestClient(app) as client:
         app.state.orchestrator_client = StubOrchestratorClient()
@@ -320,6 +343,7 @@ def test_chat_rejects_short_x_session_id():
 
 
 def test_chat_requires_auth():
+    """Chat requires auth."""
     app = create_app()
     with TestClient(app) as client:
         response = client.post("/api/chat", json={"message": "Hello"})
@@ -327,6 +351,7 @@ def test_chat_requires_auth():
 
 
 def test_chat_validation_rejects_blank_message():
+    """Chat validation rejects blank message."""
     app = create_app()
     with TestClient(app) as client:
         app.state.orchestrator_client = StubOrchestratorClient()
@@ -342,9 +367,11 @@ class EnrichedDoneStreamStub:
     """Simulates orchestrator client output after RAG SSE aggregation."""
 
     async def chat(self, *args, **kwargs):
+        """Chat."""
         raise NotImplementedError
 
     async def stream_chat(self, *args, **kwargs):
+        """Stream chat."""
         done = json.dumps(
             {
                 "status": "success",
@@ -358,6 +385,7 @@ class EnrichedDoneStreamStub:
 
 
 def test_chat_stream_preserves_citations_and_follow_ups_on_done():
+    """Chat stream preserves citations and follow ups on done."""
     app = create_app()
     with TestClient(app) as client:
         app.state.orchestrator_client = EnrichedDoneStreamStub()
@@ -377,6 +405,7 @@ def test_chat_stream_preserves_citations_and_follow_ups_on_done():
 
 
 def test_chat_streaming_contract():
+    """Chat streaming contract."""
     app = create_app()
     with TestClient(app) as client:
         app.state.orchestrator_client = StubOrchestratorClient()
@@ -396,6 +425,7 @@ def test_chat_streaming_contract():
 
 
 def test_chat_streaming_via_json_body_stream_flag():
+    """Chat streaming via json body stream flag."""
     app = create_app()
     with TestClient(app) as client:
         app.state.orchestrator_client = StubOrchestratorClient()
@@ -413,9 +443,11 @@ def test_chat_streaming_via_json_body_stream_flag():
 
 class StubOrchestratorContextErrorInStream:
     async def chat(self, *args, **kwargs):
+        """Chat."""
         raise NotImplementedError
 
     async def stream_chat(self, *args, **kwargs):
+        """Stream chat."""
         yield 'event: token\ndata: {"text":"partial answer"}\n\n'
         bad = (
             "Error: ValueError: <Token var=<ContextVar name='pipeline_phase' at 0x0> "
@@ -425,6 +457,7 @@ class StubOrchestratorContextErrorInStream:
 
 
 def test_chat_stream_rewrites_contextvar_poison_token_to_sse_error():
+    """Chat stream rewrites contextvar poison token to sse error."""
     app = create_app()
     with TestClient(app) as client:
         app.state.orchestrator_client = StubOrchestratorContextErrorInStream()

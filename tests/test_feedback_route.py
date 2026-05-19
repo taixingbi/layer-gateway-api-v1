@@ -14,17 +14,21 @@ def _auth_headers():
 class StubWithFeedback:
     """Orchestrator stub that records feedback POST body."""
     async def chat(self, *args, **kwargs):
+        """Chat."""
         raise NotImplementedError
 
     async def stream_chat(self, *args, **kwargs):
+        """Stream chat."""
         raise NotImplementedError
 
     async def post_feedback(self, body):
+        """Post feedback."""
         assert body["trace_id"] == "req-123"
         return 200, {"ok": True}
 
 
 def test_feedback_returns_501_when_contract_is_gateway_json(monkeypatch):
+    """Feedback returns 501 when contract is gateway json."""
     monkeypatch.setenv("ORCHESTRATOR_CONTRACT", "gateway_json")
     get_settings.cache_clear()
     app = create_app()
@@ -39,6 +43,7 @@ def test_feedback_returns_501_when_contract_is_gateway_json(monkeypatch):
 
 
 def test_feedback_requires_auth():
+    """Feedback requires auth."""
     app = create_app()
     with TestClient(app) as client:
         response = client.post("/api/feedback", json={"trace_id": "x", "rating": "thumbs_up"})
@@ -46,6 +51,7 @@ def test_feedback_requires_auth():
 
 
 def test_feedback_proxies_when_flat_headers(monkeypatch):
+    """Feedback proxies when flat headers."""
     monkeypatch.setenv("ORCHESTRATOR_CONTRACT", "flat_headers")
     app = create_app()
     with TestClient(app) as client:
