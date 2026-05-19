@@ -45,6 +45,8 @@ _EVENT_PHASE: dict[str, str] = {
     "orchestrator_api_response": "orchestrator_upstream",
     "stream_metadata_supplement_failed": "upstream",
     "logger_configured": "system",
+    "password_reset_redirect_resolved": "auth",
+    "password_reset_redirect_rejected": "auth",
 }
 
 _EVENT_MESSAGE: dict[str, str] = {
@@ -60,6 +62,8 @@ _EVENT_MESSAGE: dict[str, str] = {
     "orchestrator_api_response": "orchestrator_api_response",
     "stream_metadata_supplement_failed": "Stream metadata supplement failed",
     "logger_configured": "Logger configured",
+    "password_reset_redirect_resolved": "Password reset redirect resolved",
+    "password_reset_redirect_rejected": "Password reset redirect rejected",
 }
 
 _LEVEL_NUM: dict[str, int] = {

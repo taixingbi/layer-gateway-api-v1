@@ -3,6 +3,7 @@ from urllib.parse import urlparse
 from fastapi import HTTPException
 
 from app.core.config import Settings
+from app.core.logging import log_event
 
 RESET_PASSWORD_PATH = "/auth/reset-password"
 
@@ -33,11 +34,26 @@ def resolve_password_reset_redirect(settings: Settings, override: str | None = N
     """Build allowlisted redirect URL for Supabase reset emails."""
     default = f"{settings.frontend_url.rstrip('/')}{RESET_PASSWORD_PATH}"
     if not override or not override.strip():
+        log_event(
+            "password_reset_redirect_resolved",
+            phase="auth",
+            redirect_to=default,
+            source="default",
+            override_provided=False,
+        )
         return default
 
     url = override.strip()
     parsed = urlparse(url)
     if parsed.path.rstrip("/") != RESET_PASSWORD_PATH:
+        log_event(
+            "password_reset_redirect_rejected",
+            level="WARN",
+            phase="auth",
+            redirect_to=url,
+            reason="invalid_path",
+            override_provided=True,
+        )
         raise HTTPException(
             status_code=400,
             detail=f"redirect_to must be exactly {{origin}}{RESET_PASSWORD_PATH}",
@@ -46,6 +62,15 @@ def resolve_password_reset_redirect(settings: Settings, override: str | None = N
     origin = _origin(url)
     allowed = redirect_origin_allowlist(settings)
     if origin not in allowed:
+        log_event(
+            "password_reset_redirect_rejected",
+            level="WARN",
+            phase="auth",
+            redirect_to=url,
+            reason="origin_not_allowed",
+            origin=origin,
+            override_provided=True,
+        )
         raise HTTPException(
             status_code=400,
             detail=(
@@ -53,4 +78,11 @@ def resolve_password_reset_redirect(settings: Settings, override: str | None = N
                 f"Set FRONTEND_URL (and optional ADDITIONAL_FRONTEND_URLS) on the gateway to include this origin."
             ),
         )
+    log_event(
+        "password_reset_redirect_resolved",
+        phase="auth",
+        redirect_to=url,
+        source="override",
+        override_provided=True,
+    )
     return url
