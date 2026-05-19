@@ -36,5 +36,6 @@ def _mock_supabase_middleware_auth(monkeypatch):
         "app.middleware.auth.verify_access_token_to_auth_context",
         fake_verify,
     )
+    monkeypatch.setattr("app.routes.chat.persistence_enabled", lambda: False)
     yield
     get_settings.cache_clear()

@@ -10,7 +10,16 @@ from fastapi.responses import JSONResponse, StreamingResponse
 
 from app.core.config import get_settings
 from app.core.logging import log_event
+from app.deps.auth_bearer import parse_bearer
 from app.schemas.chat_request import ChatRequest
+from app.services.chat_history_service import (
+    ChatHistoryUnavailable,
+    append_message,
+    ensure_conversation,
+    load_messages,
+    merge_history,
+    persistence_enabled,
+)
 from app.schemas.history import ChatHistoryMessage
 from app.schemas.chat_response import ChatResponse, ErrorDetails, Usage
 from app.schemas.orchestrator import (
@@ -120,6 +129,60 @@ def _normalize_request(payload: ChatRequest, request: Request) -> ChatRequest:
     return payload
 
 
+def _prepare_chat_history(request: Request, payload: ChatRequest) -> None:
+    """Load DB history, merge client tail, persist user message when Supabase is available."""
+    if not persistence_enabled():
+        log_event(
+            "chat_history_skipped",
+            path="/api/chat",
+            reason="supabase_not_configured",
+            **_chat_correlation_log_kwargs(request),
+        )
+        return
+
+    access_token = parse_bearer(request.headers.get("authorization"))
+    user_id = request.state.auth_context["user_id"]
+    conv_input = getattr(request.state, "conversation_id", None)
+
+    try:
+        conv_id = ensure_conversation(
+            access_token,
+            user_id,
+            conv_input,
+            first_message=payload.message,
+        )
+        request.state.conversation_id = conv_id
+        db_history = load_messages(access_token, user_id, conv_id)
+        payload.history = merge_history(db_history, payload.history)
+        append_message(access_token, user_id, conv_id, "user", payload.message)
+        request.state.chat_history_access_token = access_token
+        request.state.chat_history_user_id = user_id
+        request.state.chat_history_conversation_id = conv_id
+    except ChatHistoryUnavailable:
+        log_event(
+            "chat_history_skipped",
+            path="/api/chat",
+            reason="supabase_unavailable",
+            **_chat_correlation_log_kwargs(request),
+        )
+
+
+def _persist_assistant_message(request: Request, answer: str) -> None:
+    """Insert assistant turn after successful orchestrator response."""
+    conv_id = getattr(request.state, "chat_history_conversation_id", None)
+    token = getattr(request.state, "chat_history_access_token", None)
+    user_id = getattr(request.state, "chat_history_user_id", None)
+    if not conv_id or not token or not user_id:
+        return
+    text = (answer or "").strip()
+    if not text:
+        return
+    try:
+        append_message(token, user_id, conv_id, "assistant", text)
+    except ChatHistoryUnavailable:
+        pass
+
+
 def _build_orchestrator_request(payload: ChatRequest, request: Request) -> OrchestratorChatRequest:
     """Translate frontend payload plus gateway context into orchestrator contract."""
     # Trusted claims come from middleware, not from client body.
@@ -202,6 +265,7 @@ async def chat(request: Request, payload: ChatRequest):
         method=request.method,
         **_chat_correlation_log_kwargs(request),
     )
+    _prepare_chat_history(request, payload)
     orchestrator_payload = _build_orchestrator_request(payload, request)
     request.state.conversation_id = orchestrator_payload.context.conversation_id
 
@@ -225,11 +289,14 @@ async def chat(request: Request, payload: ChatRequest):
         ctx = _build_call_context(request, orchestrator_payload, stream=False)
         result = await client.chat(orchestrator_payload, ctx)
         log_event("orchestrator_call_succeeded", **_chat_correlation_log_kwargs(request))
+        _persist_assistant_message(request, result.answer)
+        conv_id = getattr(request.state, "conversation_id", None)
         body = ChatResponse(
             status="success",
             session_id=orchestrator_payload.context.session_id,
             request_id=request.state.request_id,
             trace_id=request.state.trace_id,
+            conversation_id=conv_id,
             answer=result.answer,
             rewrite=getattr(result, "rewrite", None),
             citations=result.citations,
@@ -264,6 +331,7 @@ async def _stream_response(request: Request, orchestrator_payload: OrchestratorC
     ttfb_start = time.perf_counter()
     stream_failed = False
     upstream_done_sent = False
+    assistant_parts: list[str] = []
     try:
         # Forward normalized token events from orchestrator stream.
         async for token_event in client.stream_chat(orchestrator_payload, ctx):
@@ -286,12 +354,15 @@ async def _stream_response(request: Request, orchestrator_payload: OrchestratorC
                 }
                 yield f"event: error\ndata: {json.dumps(err)}\n\n"
                 break
+            if token_text:
+                assistant_parts.append(token_text)
             yield token_event
         if stream_failed:
             yield 'event: done\ndata: {"status":"error"}\n\n'
-        elif not upstream_done_sent:
-            # Mark stream completion with terminal success event.
-            yield "event: done\ndata: {\"status\":\"success\"}\n\n"
+        else:
+            if not upstream_done_sent:
+                yield "event: done\ndata: {\"status\":\"success\"}\n\n"
+            _persist_assistant_message(request, "".join(assistant_parts))
     except HTTPException as exc:
         # Convert mapped HTTP failures to stream-safe error envelope.
         payload = {"status": "error", "error": {"code": str(exc.status_code), "message": exc.detail}}

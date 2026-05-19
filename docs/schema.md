@@ -73,6 +73,7 @@ Example:
 | `session_id` | string | Yes | From `X-Session-Id` or gateway-minted |
 | `request_id` | string | Yes | From `X-Request-Id` or gateway-minted |
 | `trace_id` | string | Yes | From `X-Trace-Id` or gateway-minted |
+| `conversation_id` | string | No | UUID when chat history persistence ran |
 | `answer` | string | Yes | Assistant text |
 | `rewrite` | string | No | Intent-router rewritten question; omitted when absent |
 | `citations` | array | Yes | Default `[]`; see [Citation object](#citation-object) |
@@ -273,8 +274,9 @@ Used in JSON `ChatResponse.error` when present.
 
 | Status | When |
 |--------|------|
-| `400` | Empty message, length exceeded, invalid `X-Session-Id` / `X-Conversation-Id` |
+| `400` | Empty message, length exceeded, invalid `X-Session-Id` / `X-Conversation-Id`, invalid UUID `conversation_id` when persisting |
 | `401` | Missing/invalid bearer |
+| `404` | Unknown or unowned `conversation_id` when persisting or loading history |
 | `422` | JSON validation (unknown fields, bad types) |
 | `502` / `504` | Orchestrator failure / timeout |
 | `503` | Inflight limit (`MAX_INFLIGHT_REQUESTS`) |
@@ -307,5 +309,58 @@ Gateway → orchestrator:
 **`gateway_json`:** history is under `input.history` in the nested orchestrator body (alongside `input.question`).
 
 Upstream non-stream JSON (`OrchestratorChatResponse`): `answer`, `citations`, `follow_up_questions`, `usage`.
+
+---
+
+## `GET /api/conversations`
+
+### Request headers
+
+| Header | Required | Description |
+|--------|----------|-------------|
+| `Authorization` | Yes | `Bearer <access_token>` |
+
+### Query parameters
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `limit` | integer | `50` | 1–100 |
+
+### Response (`ConversationListResponse`)
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `conversations` | array | Newest `updated_at` first |
+| `conversations[].id` | string | UUID |
+| `conversations[].title` | string | Optional |
+| `conversations[].created_at` | string | ISO 8601 (EST) |
+| `conversations[].updated_at` | string | ISO 8601 (EST) |
+
+---
+
+## `GET /api/conversations/{conversation_id}/messages`
+
+### Request headers
+
+| Header | Required | Description |
+|--------|----------|-------------|
+| `Authorization` | Yes | `Bearer <access_token>` |
+
+### Response (`ConversationMessagesResponse`)
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `conversation_id` | string | UUID path parameter |
+| `messages` | array | Ordered by `created_at` ascending |
+| `messages[].id` | integer | Optional message id |
+| `messages[].role` | string | `user` or `assistant` |
+| `messages[].content` | string | Message text |
+| `messages[].created_at` | string | Optional ISO 8601 (EST) |
+
+| Status | When |
+|--------|------|
+| `404` | Conversation not found or not owned by caller |
+
+---
 
 See also: [design.md](./design.md), [smoke-test.md](./smoke-test.md).

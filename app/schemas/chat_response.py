@@ -29,6 +29,7 @@ class ChatResponse(BaseModel):
     session_id: str
     request_id: str
     trace_id: str
+    conversation_id: str | None = None
     answer: str
     rewrite: str | None = None
     citations: list[dict[str, Any]] = Field(default_factory=list)

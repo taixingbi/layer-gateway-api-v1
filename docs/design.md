@@ -19,6 +19,7 @@ flowchart TD
 - Validate bearer token and build trusted auth context.
 - Generate/propagate `request_id`, `trace_id`, and `session_id` (session from `X-Session-Id` header when present, else body, else minted).
 - Validate and normalize input payload.
+- Persist chat history to Supabase (`conversations`, `messages`) keyed by trusted `user_id` from auth (never from client body).
 - Call orchestrator with timeout/retry and map errors.
 - Return a stable frontend contract.
 - Emit structured logs for request lifecycle.
@@ -45,7 +46,7 @@ Request:
 - `X-Session-Id` header (optional): session continuity; if omitted the gateway mints `sess_…` (never accept `session_id` in JSON — `extra=forbid`).
 - `conversation_id` (optional)
 - `message` (required)
-- `history` (optional array of `{role, content}` prior turns; forwarded to orchestrator)
+- `history` (optional array of `{role, content}` prior turns; DB-loaded history is canonical, with unsaved client tail appended when longer)
 - `client_timestamp` (optional)
 - `metadata` (optional object)
 
@@ -62,12 +63,32 @@ Body sections:
 - `input`: normalized `question` and optional `history`
 - `client`: source and metadata
 
+### Chat history persistence (`POST /api/chat`)
+
+When Supabase is configured:
+
+1. Resolve or mint `conversation_id` (UUID) owned by `auth_context.user_id`.
+2. Load prior messages from `messages`; merge with client `history` (append client tail beyond DB length).
+3. Insert the user message before calling the orchestrator.
+4. On successful response (JSON or stream `done`), insert the assistant message.
+5. Return `conversation_id` in JSON body and stream `meta` when set.
+
+If Supabase is unavailable, chat proceeds without persistence (`chat_history_skipped` log).
+
+RLS policies: run `sql/chat_history_rls.sql` in Supabase (or use `SUPABASE_SERVICE_KEY` with gateway-side `user_id` filters).
+
+### Conversation read APIs
+
+- `GET /api/conversations` — list threads for the authenticated user (newest `updated_at` first).
+- `GET /api/conversations/{conversation_id}/messages` — full message list for one owned thread.
+
 ### Gateway -> Frontend
 Stable response:
 - `status`
 - `session_id`
 - `request_id`
 - `trace_id`
+- `conversation_id` (when persisted)
 - `answer`
 - `citations`
 - `follow_up_questions` (from orchestrator / RAG when present)
@@ -89,6 +110,8 @@ Streaming events:
 - `app/middleware/inflight.py`: concurrency cap (backpressure).
 - `app/middleware/auth.py`: auth guard and context extraction.
 - `app/routes/chat.py`: main gateway endpoint and SSE handling.
+- `app/routes/conversations.py`: conversation list and message history.
+- `app/services/chat_history_service.py`: Supabase conversations/messages CRUD.
 - `app/routes/health.py`: liveness (`/health`) and readiness (`/ready`) endpoints.
 - `app/routes/metrics.py`: Prometheus scrape (`/metrics`).
 - `app/core/metrics.py`: metric definitions.
