@@ -90,14 +90,21 @@ def test_claims_to_auth_context_missing_sub_raises():
         claims_to_auth_context({"tenant_id": "x"}, settings)
 
 
-def test_settings_jwt_mode_requires_issuer_audience_jwks():
-    """Settings jwt mode requires issuer audience jwks."""
+def test_settings_jwt_mode_requires_issuer_audience_jwks(monkeypatch):
+    """Settings jwt mode requires issuer audience jwks when Supabase is not configured."""
+    monkeypatch.delenv("SUPABASE_URL", raising=False)
+    monkeypatch.delenv("SUPABASE_ANON_KEY", raising=False)
+    monkeypatch.delenv("SUPABASE_SERVICE_KEY", raising=False)
+    monkeypatch.delenv("SUPABASE_SERVICE_ROLE_KEY", raising=False)
     with pytest.raises(ValueError, match="AUTH_JWT"):
         Settings(
             auth_mode="jwt",
             auth_jwt_issuer="",
             auth_jwt_audience="aud",
             auth_jwt_jwks_url="https://x/jwks",
+            supabase_url="",
+            supabase_anon_key="",
+            supabase_service_key="",
         )
 
 

@@ -28,4 +28,11 @@ jobs:
         run: pip install -e ".[dev]"
 
       - name: Run tests
+        env:
+          AUTH_MODE: jwt
+          AUTH_JWT_ISSUER: test-issuer
+          AUTH_JWT_AUDIENCE: test-audience
+          AUTH_JWT_JWKS_URL: http://localhost/.well-known/jwks.json
+          SUPABASE_URL: https://test.supabase.co
+          SUPABASE_ANON_KEY: test-anon-key
         run: pytest

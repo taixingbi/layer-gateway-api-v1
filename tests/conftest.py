@@ -1,4 +1,14 @@
-"""Pytest fixtures: mock Supabase auth for protected routes."""
+"""Pytest fixtures: test env defaults and mock Supabase auth for protected routes."""
+
+import os
+
+# Set before any ``app`` import so ``Settings()`` validation passes during collection.
+os.environ.setdefault("AUTH_MODE", "jwt")
+os.environ.setdefault("AUTH_JWT_ISSUER", "test-issuer")
+os.environ.setdefault("AUTH_JWT_AUDIENCE", "test-audience")
+os.environ.setdefault("AUTH_JWT_JWKS_URL", "http://localhost/.well-known/jwks.json")
+os.environ.setdefault("SUPABASE_URL", "https://test.supabase.co")
+os.environ.setdefault("SUPABASE_ANON_KEY", "test-anon-key")
 
 import pytest
 
@@ -13,6 +23,7 @@ def _mock_supabase_middleware_auth(monkeypatch):
     get_settings.cache_clear()
 
     def fake_verify(access_token: str, settings=None):
+        """Return a fixed auth context for any bearer token in tests."""
         return {
             "user_id": "user_001",
             "tenant_id": "tenant_01",
