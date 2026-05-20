@@ -36,6 +36,8 @@ class StubOrchestratorClient:
                 "citations": [{"source": "personal_profile"}],
                 "follow_up_questions": [],
                 "usage": {"input_tokens": 1, "output_tokens": 2, "model": "qwen2.5-7b"},
+                "timings_ms": {"total": 1200.5, "rag": {"total": 900}},
+                "route": "rag",
             },
         )()
 
@@ -95,6 +97,7 @@ def test_chat_persists_on_success(
     assert response.status_code == 200
     body = response.json()
     assert body["conversation_id"] == conv_id
+    assert body["timings_ms"]["total"] == 1200.5
     assert mock_ensure.called
     assert mock_load.called
     assert mock_append.call_count == 2
@@ -108,6 +111,8 @@ def test_chat_persists_on_success(
         "rewrite": "what is taixing visa status",
         "citations": [{"source": "personal_profile"}],
         "model": "qwen2.5-7b",
+        "route": "rag",
+        "timings_ms": {"total": 1200.5, "rag": {"total": 900}},
     }
 
 
@@ -141,10 +146,10 @@ def test_chat_stream_persists_assistant_without_rewrite(
     assert mock_append.call_args_list[0].args[4] == "how are you?"
     assert mock_append.call_args_list[1].args[3] == "assistant"
     assert mock_append.call_args_list[1].args[4] == "I'm doing well and ready to help."
-    assert mock_append.call_args_list[1].kwargs["metadata"] == {
-        "rewrite": "how are you?",
-        "citations": [{"source": "personal_profile"}],
-    }
+    meta = mock_append.call_args_list[1].kwargs["metadata"]
+    assert meta["rewrite"] == "how are you?"
+    assert meta["citations"] == [{"source": "personal_profile"}]
+    assert meta["route"] == "rag"
 
 
 @patch("app.routes.chat.persistence_enabled", return_value=False)

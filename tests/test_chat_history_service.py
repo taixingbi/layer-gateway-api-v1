@@ -13,6 +13,7 @@ from app.services.chat_history_service import (
     assistant_message_metadata,
     ensure_conversation,
     merge_history,
+    orchestrator_timings_ms,
     resolve_assistant_model_name,
     _validate_uuid,
 )
@@ -38,6 +39,21 @@ def test_merge_history_returns_db_when_client_shorter():
     ]
     client = [ChatHistoryMessage(role="user", content="x")]
     assert merge_history(db, client) == db
+
+
+def test_orchestrator_timings_ms_extracts_dict():
+    payload = {"timings_ms": {"total": 100.5, "rag": {"total": 80}}}
+    assert orchestrator_timings_ms(payload) == payload["timings_ms"]
+
+
+def test_assistant_message_metadata_includes_timings_ms():
+    timings = {"total": 3632.46, "rag": {"total": 2367.0}}
+    meta = assistant_message_metadata(
+        rewrite="visa",
+        timings_ms=timings,
+    )
+    assert meta is not None
+    assert meta["timings_ms"] == timings
 
 
 @patch("app.core.config.get_settings")

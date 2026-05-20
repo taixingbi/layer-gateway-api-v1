@@ -115,6 +115,41 @@ def _row_to_conversation_summary(row: dict) -> dict:
     }
 
 
+def orchestrator_timings_ms(source: Any) -> dict[str, Any] | None:
+    """Extract ``timings_ms`` from orchestrator JSON (dict, Pydantic model, or stub)."""
+    if source is None:
+        return None
+    if isinstance(source, dict):
+        timings = source.get("timings_ms")
+    elif hasattr(source, "model_dump"):
+        timings = source.model_dump(mode="json").get("timings_ms")
+    else:
+        timings = getattr(source, "timings_ms", None)
+    return timings if isinstance(timings, dict) and timings else None
+
+
+def orchestrator_payload_dict(source: Any) -> dict[str, Any]:
+    """Normalize orchestrator result to a dict for persistence helpers."""
+    if isinstance(source, dict):
+        return dict(source)
+    if hasattr(source, "model_dump"):
+        return source.model_dump(mode="json")
+    out: dict[str, Any] = {}
+    for key in (
+        "answer",
+        "rewrite",
+        "route",
+        "usage",
+        "timings_ms",
+        "citations",
+        "follow_up_questions",
+    ):
+        val = getattr(source, key, None)
+        if val is not None:
+            out[key] = val
+    return out
+
+
 def default_chat_route_label() -> str:
     """Label stored on assistant messages / feedback when upstream omits route."""
     from app.core.config import get_settings
@@ -131,6 +166,7 @@ def assistant_message_metadata(
     follow_up_questions: list[str] | None = None,
     model: str | None = None,
     route: str | None = None,
+    timings_ms: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     """Build optional ``metadata`` jsonb for assistant rows (omit when empty)."""
     meta: dict[str, Any] = {}
@@ -144,6 +180,8 @@ def assistant_message_metadata(
         meta["model"] = model.strip()
     route_label = (route or "").strip() or default_chat_route_label()
     meta["route"] = route_label
+    if timings_ms:
+        meta["timings_ms"] = timings_ms
     return meta or None
 
 

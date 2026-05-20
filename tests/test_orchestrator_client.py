@@ -16,7 +16,20 @@ from app.schemas.orchestrator import (
     OrchestratorInput,
 )
 from app.services.orchestrator_call_context import OrchestratorCallContext
-from app.services.orchestrator_client import OrchestratorClient
+from app.services.orchestrator_client import OrchestratorClient, _gateway_done_payload
+
+
+def test_gateway_done_payload_includes_timings_ms():
+    raw = json.dumps(
+        {
+            "status": "ok",
+            "timings_ms": {"total": 3632.46, "rag": {"total": 2367.0}},
+            "citations": [],
+            "follow_up_questions": [],
+        }
+    )
+    body = _gateway_done_payload(raw, citations=[], follow_up_questions=[])
+    assert body["timings_ms"]["total"] == 3632.46
 
 
 def _payload() -> OrchestratorChatRequest:

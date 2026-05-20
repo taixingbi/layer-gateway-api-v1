@@ -739,6 +739,8 @@ def _done_body_from_orchestrator_result(result: OrchestratorChatResponse) -> dic
         body["citations"] = result.citations
     if result.follow_up_questions:
         body["follow_up_questions"] = result.follow_up_questions
+    if result.timings_ms:
+        body["timings_ms"] = result.timings_ms
     return body
 
 
@@ -833,6 +835,9 @@ def _gateway_done_payload(
     upstream_follow = parsed.get("follow_up_questions")
     if isinstance(upstream_follow, list) and upstream_follow:
         body["follow_up_questions"] = [str(q) for q in upstream_follow if q]
+    upstream_timings = parsed.get("timings_ms")
+    if isinstance(upstream_timings, dict) and upstream_timings:
+        body["timings_ms"] = upstream_timings
     return body
 
 

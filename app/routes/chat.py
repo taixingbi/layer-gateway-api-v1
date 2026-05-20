@@ -20,6 +20,8 @@ from app.services.chat_history_service import (
     load_messages,
     merge_history,
     message_persist_status,
+    orchestrator_payload_dict,
+    orchestrator_timings_ms,
     persistence_enabled,
     _model_from_usage,
     resolve_assistant_model_name,
@@ -243,11 +245,17 @@ def _persist_assistant_message(
     text = (answer or "").strip()
     if not text:
         return None
+    timings = orchestrator_timings_ms(done_payload)
+    route_from_done = (
+        (done_payload or {}).get("route") if isinstance(done_payload, dict) else None
+    )
     metadata = assistant_message_metadata(
         rewrite=rewrite,
         citations=citations,
         follow_up_questions=follow_up_questions,
         model=resolve_assistant_model_name(usage=usage, done_payload=done_payload),
+        route=route_from_done if isinstance(route_from_done, str) else None,
+        timings_ms=timings,
     )
     try:
         msg_id = append_message(
@@ -376,6 +384,7 @@ async def chat(request: Request, payload: ChatRequest):
         ctx = _build_call_context(request, orchestrator_payload, stream=False)
         result = await client.chat(orchestrator_payload, ctx)
         log_event("orchestrator_call_succeeded", **_chat_correlation_log_kwargs(request))
+        timings = orchestrator_timings_ms(result)
         assistant_message_id = _persist_assistant_message(
             request,
             result.answer,
@@ -383,6 +392,7 @@ async def chat(request: Request, payload: ChatRequest):
             citations=result.citations,
             follow_up_questions=getattr(result, "follow_up_questions", None) or [],
             usage=result.usage,
+            done_payload=orchestrator_payload_dict(result),
         )
         conv_id = getattr(request.state, "conversation_id", None)
         body = ChatResponse(
@@ -397,6 +407,7 @@ async def chat(request: Request, payload: ChatRequest):
             citations=result.citations,
             follow_up_questions=getattr(result, "follow_up_questions", None) or [],
             usage=Usage(**result.usage) if result.usage else Usage(),
+            timings_ms=timings,
         )
         return JSONResponse(content=body.model_dump(mode="json", exclude_none=True))
     except HTTPException as exc:
@@ -512,6 +523,9 @@ async def _stream_response(request: Request, orchestrator_payload: OrchestratorC
                 done_body["citations"] = stream_citations
             if stream_follow_ups and not done_body.get("follow_up_questions"):
                 done_body["follow_up_questions"] = stream_follow_ups
+            stream_timings = orchestrator_timings_ms(done_body)
+            if stream_timings and not done_body.get("timings_ms"):
+                done_body["timings_ms"] = stream_timings
             yield _format_done_sse_chunk(done_body)
     except HTTPException as exc:
         # Convert mapped HTTP failures to stream-safe error envelope.

@@ -81,6 +81,7 @@ Example:
 | `usage` | object | Yes | Token usage |
 | `usage.input_tokens` | integer | Yes | Default `0` |
 | `usage.output_tokens` | integer | Yes | Default `0` |
+| `timings_ms` | object | No | Orchestrator latency breakdown (also stored on assistant `messages.metadata`) |
 | `error` | object | No | Omitted on success; see [Error object](#error-object) |
 
 Example:
@@ -394,7 +395,7 @@ Upstream non-stream JSON (`OrchestratorChatResponse`): `answer`, `citations`, `f
 | `messages[].role` | string | `user` or `assistant` |
 | `messages[].content` | string | Message text |
 | `messages[].status` | string | Optional; assistant rows use `complete` |
-| `messages[].metadata` | object | Optional jsonb; assistant may include `rewrite`, `citations`, `follow_up_questions`, `model` |
+| `messages[].metadata` | object | Optional jsonb; assistant may include `rewrite`, `citations`, `follow_up_questions`, `model`, `route`, `timings_ms` |
 | `messages[].created_at` | string | Optional ISO 8601 (EST) |
 
 | Status | When |
