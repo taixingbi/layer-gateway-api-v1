@@ -9,3 +9,6 @@
 -- Thumbs down + reason:
 --   feedback=-1, feedback_reason=not_factual, preference_score=1,
 --   metadata={"rating":"thumbs_down"}, feedback_comment=...
+--
+-- DB CHECK is optional (gateway enforces enums). See sql/message_feedback_feedback_reason_constraint.sql
+-- created_at: DB default now(); gateway does not send it (auto-filled on insert).

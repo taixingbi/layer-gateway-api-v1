@@ -107,6 +107,13 @@ Expect `401`.
 
 Requires **`SUPABASE_URL`** + **`SUPABASE_ANON_KEY`**. Use ids from a prior `/api/chat` response.
 
+If inserts fail with `message_feedback_feedback_type_check`, drop that CHECK in Supabase (or run step 1 of
+`sql/message_feedback_feedback_reason_constraint.sql`). **No DB constraint is required** — the gateway normalizes
+`feedback_reason` before insert.
+
+In the Table Editor, scroll right to see **`feedback_reason`**, **`metadata`**, **`feedback_comment`**, **`created_at`**.
+Thumbs up rows have **`feedback_reason` = NULL** by design; **`created_at`** is set by DB default `now()`.
+
 **Thumbs up**
 
 ```bash

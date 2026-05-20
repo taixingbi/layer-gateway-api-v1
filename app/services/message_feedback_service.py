@@ -7,12 +7,14 @@ from typing import Any
 
 from fastapi import HTTPException
 
+from app.core.config import get_settings
 from app.services.chat_history_service import (
     ChatHistoryUnavailable,
     _assert_conversation_owned,
     _handle_db_error,
     _table,
     _validate_uuid,
+    default_chat_route_label,
     persistence_enabled,
 )
 from app.services.time_util import format_iso_est
@@ -94,6 +96,36 @@ def _row_to_feedback(row: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+def _model_route_from_message(
+    access_token: str,
+    message_id: str,
+    conversation_id: str,
+) -> tuple[str | None, str | None]:
+    """Read ``model`` / ``route`` from the assistant message ``metadata`` jsonb."""
+    try:
+        result = (
+            _table(access_token, "messages")
+            .select("metadata")
+            .eq("id", message_id)
+            .eq("conversation_id", conversation_id)
+            .limit(1)
+            .execute()
+        )
+    except Exception as exc:
+        _handle_db_error(exc)
+    if not result.data:
+        return None, None
+    meta = result.data[0].get("metadata")
+    if not isinstance(meta, dict):
+        return None, None
+    model = meta.get("model")
+    route = meta.get("route")
+    return (
+        model.strip() if isinstance(model, str) and model.strip() else None,
+        route.strip() if isinstance(route, str) and route.strip() else None,
+    )
+
+
 def _assert_message_in_conversation(
     access_token: str,
     user_id: str,
@@ -120,6 +152,23 @@ def _assert_message_in_conversation(
     return mid, cid
 
 
+def _resolve_model_route_for_feedback(
+    access_token: str,
+    message_id: str,
+    conversation_id: str,
+    *,
+    model: str | None,
+    route: str | None,
+) -> tuple[str | None, str | None]:
+    """Prefer explicit body fields; else assistant message metadata; else gateway defaults."""
+    msg_model, msg_route = _model_route_from_message(access_token, message_id, conversation_id)
+    resolved_model = (model or "").strip() or msg_model
+    if not resolved_model:
+        resolved_model = (get_settings().chat_assistant_model or "").strip() or None
+    resolved_route = (route or "").strip() or msg_route or default_chat_route_label()
+    return resolved_model, resolved_route
+
+
 def insert_message_feedback(
     access_token: str,
     user_id: str,
@@ -142,6 +191,9 @@ def insert_message_feedback(
         raise ChatHistoryUnavailable()
 
     mid, cid = _assert_message_in_conversation(access_token, user_id, message_id, conversation_id)
+    model, route = _resolve_model_route_for_feedback(
+        access_token, mid, cid, model=model, route=route
+    )
 
     if feedback is not None and feedback not in (-1, 0, 1):
         raise HTTPException(status_code=400, detail="feedback must be -1, 0, or 1")

@@ -40,17 +40,21 @@ def test_merge_history_returns_db_when_client_shorter():
 
 
 def test_assistant_message_metadata_omits_empty_fields():
-    """Metadata jsonb only includes non-empty assistant enrichment."""
-    assert assistant_message_metadata(rewrite="  ") is None
+    """Metadata always includes default route; skips blank rewrite."""
+    meta_empty = assistant_message_metadata(rewrite="  ")
+    assert meta_empty is not None
+    assert "route" in meta_empty
     meta = assistant_message_metadata(
         rewrite="visa status",
         citations=[{"source": "personal_profile"}],
         model="qwen2.5-7b",
+        route="rag",
     )
     assert meta == {
         "rewrite": "visa status",
         "citations": [{"source": "personal_profile"}],
         "model": "qwen2.5-7b",
+        "route": "rag",
     }
 
 

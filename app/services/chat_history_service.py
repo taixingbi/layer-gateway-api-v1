@@ -115,12 +115,22 @@ def _row_to_conversation_summary(row: dict) -> dict:
     }
 
 
+def default_chat_route_label() -> str:
+    """Label stored on assistant messages / feedback when upstream omits route."""
+    from app.core.config import get_settings
+
+    if get_settings().orchestrator_contract == "flat_headers":
+        return "rag"
+    return "direct_llm"
+
+
 def assistant_message_metadata(
     *,
     rewrite: str | None = None,
     citations: list[dict[str, Any]] | None = None,
     follow_up_questions: list[str] | None = None,
     model: str | None = None,
+    route: str | None = None,
 ) -> dict[str, Any] | None:
     """Build optional ``metadata`` jsonb for assistant rows (omit when empty)."""
     meta: dict[str, Any] = {}
@@ -132,6 +142,8 @@ def assistant_message_metadata(
         meta["follow_up_questions"] = follow_up_questions
     if model and model.strip():
         meta["model"] = model.strip()
+    route_label = (route or "").strip() or default_chat_route_label()
+    meta["route"] = route_label
     return meta or None
 
 

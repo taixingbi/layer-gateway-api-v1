@@ -37,10 +37,48 @@ def test_prepare_feedback_reason_unknown_maps_to_other():
     assert meta["raw_feedback_reason"] == "hallucination"
 
 
+@patch("app.services.message_feedback_service.get_settings")
+@patch("app.services.message_feedback_service._model_route_from_message")
 @patch("app.services.message_feedback_service.persistence_enabled", return_value=True)
 @patch("app.services.message_feedback_service._assert_conversation_owned")
 @patch("app.services.message_feedback_service._table")
-def test_insert_message_feedback(mock_table, _owned, _enabled):
+def test_insert_backfills_model_route(mock_table, _owned, _enabled, mock_ctx, mock_settings):
+    cid = str(uuid.uuid4())
+    mid = str(uuid.uuid4())
+    mock_ctx.return_value = ("qwen2.5-7b", "rag")
+    mock_settings.return_value.chat_assistant_model = ""
+    mock_msg = MagicMock()
+    mock_msg.execute.return_value = MagicMock(data=[{"id": mid}])
+    chain = mock_table.return_value.select.return_value
+    chain.eq.return_value = chain
+    chain.limit.return_value = mock_msg
+    mock_insert_exec = MagicMock()
+    mock_insert_exec.execute.return_value = MagicMock(
+        data=[{"id": str(uuid.uuid4()), "message_id": mid, "conversation_id": cid, "metadata": {}}]
+    )
+    mock_table.return_value.insert.return_value.select.return_value = mock_insert_exec
+
+    insert_message_feedback(
+        "tok",
+        "user_001",
+        message_id=mid,
+        conversation_id=cid,
+        feedback_reason="not_factual",
+        feedback=-1,
+    )
+    insert_row = mock_table.return_value.insert.call_args[0][0]
+    assert insert_row["model"] == "qwen2.5-7b"
+    assert insert_row["route"] == "rag"
+
+
+@patch(
+    "app.services.message_feedback_service._resolve_model_route_for_feedback",
+    return_value=(None, None),
+)
+@patch("app.services.message_feedback_service.persistence_enabled", return_value=True)
+@patch("app.services.message_feedback_service._assert_conversation_owned")
+@patch("app.services.message_feedback_service._table")
+def test_insert_message_feedback(mock_table, _owned, _enabled, _resolve_mr):
     """Insert builds row with feedback_reason and metadata."""
     cid = str(uuid.uuid4())
     mid = str(uuid.uuid4())
