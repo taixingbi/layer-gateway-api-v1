@@ -230,16 +230,16 @@ def _persist_assistant_message(
     citations: list[dict[str, Any]] | None = None,
     follow_up_questions: list[str] | None = None,
     usage: dict[str, Any] | None = None,
-) -> None:
-    """Insert assistant turn after successful orchestrator response."""
+) -> str | None:
+    """Insert assistant turn after successful orchestrator response; return message id."""
     conv_id = getattr(request.state, "chat_history_conversation_id", None)
     token = getattr(request.state, "chat_history_access_token", None)
     user_id = getattr(request.state, "chat_history_user_id", None)
     if not conv_id or not token or not user_id:
-        return
+        return None
     text = (answer or "").strip()
     if not text:
-        return
+        return None
     metadata = assistant_message_metadata(
         rewrite=rewrite,
         citations=citations,
@@ -248,7 +248,7 @@ def _persist_assistant_message(
         or (get_settings().chat_assistant_model.strip() or None),
     )
     try:
-        append_message(
+        msg_id = append_message(
             token,
             user_id,
             conv_id,
@@ -257,8 +257,11 @@ def _persist_assistant_message(
             status=message_persist_status(),
             metadata=metadata,
         )
+        if msg_id:
+            request.state.last_assistant_message_id = msg_id
+        return msg_id
     except ChatHistoryUnavailable:
-        pass
+        return None
 
 
 def _build_orchestrator_request(payload: ChatRequest, request: Request) -> OrchestratorChatRequest:
@@ -367,7 +370,7 @@ async def chat(request: Request, payload: ChatRequest):
         ctx = _build_call_context(request, orchestrator_payload, stream=False)
         result = await client.chat(orchestrator_payload, ctx)
         log_event("orchestrator_call_succeeded", **_chat_correlation_log_kwargs(request))
-        _persist_assistant_message(
+        assistant_message_id = _persist_assistant_message(
             request,
             result.answer,
             rewrite=getattr(result, "rewrite", None),
@@ -382,6 +385,7 @@ async def chat(request: Request, payload: ChatRequest):
             request_id=request.state.request_id,
             trace_id=request.state.trace_id,
             conversation_id=conv_id,
+            assistant_message_id=assistant_message_id,
             answer=result.answer,
             rewrite=getattr(result, "rewrite", None),
             citations=result.citations,
@@ -410,6 +414,7 @@ async def _stream_response(request: Request, orchestrator_payload: OrchestratorC
     if orchestrator_payload.context.conversation_id:
         meta["conversation_id"] = orchestrator_payload.context.conversation_id
     yield f"event: meta\ndata: {json.dumps(meta)}\n\n"
+    stream_assistant_message_id: str | None = None
     client = request.app.state.orchestrator_client
     ctx = _build_call_context(request, orchestrator_payload, stream=True)
     upstream_first = True
@@ -465,13 +470,19 @@ async def _stream_response(request: Request, orchestrator_payload: OrchestratorC
         else:
             if not upstream_done_sent:
                 yield "event: done\ndata: {\"status\":\"success\"}\n\n"
-            _persist_assistant_message(
+            stream_assistant_message_id = _persist_assistant_message(
                 request,
                 "".join(assistant_parts),
                 rewrite=stream_rewrite,
                 citations=stream_citations,
                 follow_up_questions=stream_follow_ups,
             )
+            if stream_assistant_message_id:
+                yield (
+                    "event: meta\ndata: "
+                    + json.dumps({"assistant_message_id": stream_assistant_message_id})
+                    + "\n\n"
+                )
     except HTTPException as exc:
         # Convert mapped HTTP failures to stream-safe error envelope.
         payload = {"status": "error", "error": {"code": str(exc.status_code), "message": exc.detail}}

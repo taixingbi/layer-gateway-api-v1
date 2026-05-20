@@ -193,7 +193,7 @@ Stream failure envelope.
 
 ## `POST /api/feedback`
 
-**Only when** `ORCHESTRATOR_CONTRACT=flat_headers`. Otherwise **501**.
+Persists to Supabase **`message_feedback`** when configured. Optionally proxies to orchestrator when `ORCHESTRATOR_CONTRACT=flat_headers` and `trace_id` is set.
 
 ### Request headers
 
@@ -206,35 +206,49 @@ Stream failure envelope.
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `trace_id` | string | Yes | Correlate with chat (`X-Trace-Id` / chat `trace_id`) |
-| `request_id` | string | No | Optional chat `request_id` |
-| `rating` | string | Yes | `"thumbs_up"` or `"thumbs_down"` |
-| `feedback_type` | string | No | Upstream-specific type (e.g. `not_factual`) |
-| `comment` | string | No | Free-text comment |
-| `question` | string | No | Original user question |
+| `message_id` | string (UUID) | Yes | Assistant/user message id from chat persistence |
+| `conversation_id` | string (UUID) | Yes | Owned conversation |
+| `reviewer_type` | string | No | Default `end_user` (`ai_evaluator`, `qa_team`, `rlhf_annotator`, …) |
+| `feedback_type` | string | No | e.g. `thumbs_up`, `hallucination`, `bad_citation` |
+| `feedback` | int | No | `-1`, `0`, or `1` (derived from `rating` when omitted) |
+| `preference_score` | int | No | `1`–`5` (defaults from `rating` when omitted) |
+| `model` | string | No | Model name |
+| `route` | string | No | e.g. `rag`, `direct_llm` |
+| `prompt_version` | string | No | Prompt version label |
+| `feedback_comment` | string | No | End-user comment (alias: `comment`) |
+| `labeler_notes` | string | No | RLHF / QA notes |
+| `metadata` | object | No | Extra jsonb (latency, retrieval_chunks, …) |
+| `rating` | string | No | Legacy UI: `thumbs_up` / `thumbs_down` |
+| `trace_id` | string | No | Legacy orchestrator correlation |
+| `request_id` | string | No | Legacy chat request id |
+| `question` | string | No | Stored in `metadata.question` when set |
 
 Example:
 
 ```json
 {
-  "trace_id": "trace_demo_001",
-  "request_id": "req_demo_001",
-  "rating": "thumbs_down",
-  "feedback_type": "not_factual",
-  "comment": "Answer was incomplete",
-  "question": "What is Taixing US visa status?"
+  "message_id": "2f7f4f4d-12d7-4d92-a6ef-5e3e9c1c5f91",
+  "conversation_id": "da26bbf4-8122-4f82-a9d1-0077f02c9d0c",
+  "reviewer_type": "end_user",
+  "feedback_type": "hallucination",
+  "feedback": -1,
+  "preference_score": 1,
+  "model": "qwen2.5-7b",
+  "route": "rag",
+  "feedback_comment": "Wrong visa answer",
+  "metadata": { "latency_ms": 1820, "retrieval_chunks": 4 }
 }
 ```
 
-### Response
-
-Proxied from orchestrator:
+### Response (`FeedbackResponse`)
 
 | HTTP status | Body |
 |-------------|------|
-| `204` | Empty |
-| `2xx` | Upstream JSON (shape depends on orchestrator) |
-| `4xx` / `5xx` | Upstream error body or gateway-mapped error |
+| `200` | `{ "id", "message_id", "conversation_id", "status": "created" }` |
+| `204` | Legacy orchestrator-only success (no Supabase) |
+| `400` | Validation / schema mismatch |
+| `404` | Message not in conversation |
+| `503` | Supabase not configured |
 
 ---
 

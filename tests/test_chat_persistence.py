@@ -81,6 +81,7 @@ def test_chat_persists_on_success(
     conv_id = str(uuid.uuid4())
     mock_ensure.return_value = conv_id
     mock_load.return_value = [ChatHistoryMessage(role="user", content="prior")]
+    mock_append.return_value = None
 
     app = create_app()
     app.state.orchestrator_client = StubOrchestratorClient()

@@ -247,8 +247,8 @@ def append_message(
     *,
     status: str | None = None,
     metadata: dict[str, Any] | None = None,
-) -> None:
-    """Insert one message row; conversation updated_at bumped by DB trigger when present."""
+) -> str | None:
+    """Insert one message row; return new message id when Supabase returns it."""
     if not persistence_enabled():
         raise ChatHistoryUnavailable()
 
@@ -266,9 +266,13 @@ def append_message(
     if metadata is not None:
         insert["metadata"] = metadata
     try:
-        _table(access_token, "messages").insert(insert).execute()
+        result = _table(access_token, "messages").insert(insert).select("id").execute()
     except Exception as exc:
         _handle_db_error(exc)
+    rows = result.data or []
+    if rows and rows[0].get("id"):
+        return str(rows[0]["id"])
+    return None
 
 
 def list_conversations(
