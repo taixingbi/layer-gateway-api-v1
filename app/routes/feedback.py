@@ -16,6 +16,21 @@ from app.services.message_feedback_service import (
 router = APIRouter(prefix="/api", tags=["feedback"])
 
 
+def _conversation_id_from_header(request: Request) -> str | None:
+    """``X-Conversation-Id`` fallback (same as ``POST /api/chat``)."""
+    raw = (request.headers.get("x-conversation-id") or "").strip()
+    return raw or None
+
+
+def _resolve_feedback_ids(
+    request: Request, payload: FeedbackRequest
+) -> tuple[str | None, str | None]:
+    """Body ids first; conversation may come from ``X-Conversation-Id``."""
+    message_id = payload.message_id
+    conversation_id = payload.conversation_id or _conversation_id_from_header(request)
+    return message_id, conversation_id
+
+
 @router.post("/feedback", response_model=FeedbackResponse, response_model_exclude_none=True)
 async def post_feedback(request: Request, payload: FeedbackRequest):
     """Save message feedback to Supabase."""
@@ -28,12 +43,19 @@ async def post_feedback(request: Request, payload: FeedbackRequest):
             detail="Feedback persistence requires Supabase configuration",
         )
 
-    if not payload.message_id or not payload.conversation_id:
+    message_id, conversation_id = _resolve_feedback_ids(request, payload)
+    if not message_id or not conversation_id:
+        missing = []
+        if not message_id:
+            missing.append("message_id")
+        if not conversation_id:
+            missing.append("conversation_id")
         raise HTTPException(
             status_code=400,
             detail=(
-                "message_id and conversation_id are required to save feedback. "
-                "Wait until the assistant reply is saved, then try again."
+                f"{', '.join(missing)} required to save feedback. "
+                "Wait until the assistant reply is saved (needs assistant_message_id), "
+                "and ensure the chat thread has a conversation_id."
             ),
         )
 
@@ -41,8 +63,8 @@ async def post_feedback(request: Request, payload: FeedbackRequest):
         row = insert_message_feedback(
             access_token,
             user_id,
-            message_id=payload.message_id,
-            conversation_id=payload.conversation_id,
+            message_id=message_id,
+            conversation_id=conversation_id,
             reviewer_type=payload.reviewer_type,
             feedback_type=payload.feedback_type,
             feedback=payload.feedback,
@@ -64,8 +86,8 @@ async def post_feedback(request: Request, payload: FeedbackRequest):
 
     log_event(
         "message_feedback_saved",
-        message_id=payload.message_id,
-        conversation_id=payload.conversation_id,
+        message_id=message_id,
+        conversation_id=conversation_id,
         feedback_id=row.get("id"),
         reviewer_type=payload.reviewer_type,
         feedback_type=payload.feedback_type,

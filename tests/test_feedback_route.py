@@ -62,6 +62,29 @@ def test_feedback_trace_only_without_message_ids_returns_400(_enabled):
 
 
 @patch("app.routes.feedback.feedback_persistence_enabled", return_value=True)
+@patch("app.routes.feedback.insert_message_feedback")
+def test_feedback_accepts_conversation_id_header(mock_insert, _enabled):
+    """``X-Conversation-Id`` supplies conversation_id when omitted from JSON body."""
+    cid = str(uuid.uuid4())
+    mid = str(uuid.uuid4())
+    mock_insert.return_value = {
+        "id": str(uuid.uuid4()),
+        "message_id": mid,
+        "conversation_id": cid,
+    }
+
+    app = create_app()
+    client = TestClient(app)
+    response = client.post(
+        "/api/feedback",
+        headers={**_auth_headers(), "X-Conversation-Id": cid},
+        json={"message_id": mid, "rating": "thumbs_up"},
+    )
+    assert response.status_code == 200
+    assert mock_insert.call_args.kwargs["conversation_id"] == cid
+
+
+@patch("app.routes.feedback.feedback_persistence_enabled", return_value=True)
 def test_feedback_missing_ids_returns_400_not_422(_enabled):
     """Missing message scope returns 400 with a clear message."""
     app = create_app()
