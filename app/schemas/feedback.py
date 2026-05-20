@@ -23,13 +23,14 @@ def _empty_str_to_none(value: str | None) -> str | None:
 
 
 class FeedbackRequest(BaseModel):
-    """Message-level feedback for Supabase; legacy fields (trace_id, rating) map into columns/metadata."""
+    """Message-level feedback for Supabase; legacy ``feedback_type`` maps to ``feedback_reason``."""
 
     model_config = ConfigDict(extra="ignore")
 
     message_id: str | None = Field(default=None, max_length=128)
     conversation_id: str | None = Field(default=None, max_length=128)
     reviewer_type: str = Field(default="end_user", min_length=1, max_length=64)
+    feedback_reason: str | None = Field(default=None, max_length=128)
     feedback_type: str | None = Field(default=None, max_length=128)
     feedback: int | None = Field(default=None, ge=-1, le=1)
     preference_score: int | None = Field(default=None, ge=1, le=5)
@@ -40,7 +41,6 @@ class FeedbackRequest(BaseModel):
     labeler_notes: str | None = Field(default=None, max_length=4000)
     metadata: dict[str, Any] | None = None
 
-    # Legacy / correlation (stored in metadata when set)
     trace_id: str | None = Field(default=None, max_length=128)
     request_id: str | None = Field(default=None, max_length=128)
     rating: Literal["thumbs_up", "thumbs_down"] | None = None
@@ -58,6 +58,8 @@ class FeedbackRequest(BaseModel):
             d["message_id"] = d.pop("messageId")
         if not d.get("conversation_id") and d.get("conversationId"):
             d["conversation_id"] = d.pop("conversationId")
+        if not d.get("feedback_reason") and d.get("feedback_type"):
+            d["feedback_reason"] = d.pop("feedback_type")
         run_id = d.pop("run_id", None)
         if run_id and not d.get("trace_id"):
             d["trace_id"] = run_id
@@ -99,7 +101,7 @@ class FeedbackRequest(BaseModel):
 
     @model_validator(mode="after")
     def _normalize_legacy_fields(self) -> "FeedbackRequest":
-        """Map thumbs into scores + metadata.rating; never copy rating into feedback_type."""
+        """Map thumbs into scores + metadata.rating; reason only for thumbs down categories."""
         updates: dict[str, Any] = {}
         if self.feedback is None and self.rating is not None:
             updates["feedback"] = 1 if self.rating == "thumbs_up" else -1
@@ -116,10 +118,9 @@ class FeedbackRequest(BaseModel):
             meta["trace_id"] = self.trace_id
         if self.request_id and "request_id" not in meta:
             meta["request_id"] = self.request_id
-        # Never trust client feedback_type for thumbs; rating lives in metadata only.
-        ft = (self.feedback_type or "").strip()
-        if self.rating == "thumbs_up" or ft in ("thumbs_up", "thumbs_down"):
-            updates["feedback_type"] = None
+        reason = (self.feedback_reason or "").strip()
+        if self.rating == "thumbs_up" or reason in ("thumbs_up", "thumbs_down"):
+            updates["feedback_reason"] = None
         if updates or meta != self.metadata:
             updates["metadata"] = meta
         if updates:

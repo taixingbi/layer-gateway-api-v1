@@ -76,7 +76,7 @@ async def post_feedback(request: Request, payload: FeedbackRequest):
             message_id=message_id,
             conversation_id=conversation_id,
             reviewer_type=payload.reviewer_type,
-            feedback_type=payload.feedback_type,
+            feedback_reason=payload.feedback_reason,
             feedback=payload.feedback,
             preference_score=payload.preference_score,
             model=payload.model,
@@ -100,7 +100,7 @@ async def post_feedback(request: Request, payload: FeedbackRequest):
         conversation_id=conversation_id,
         feedback_id=row.get("id"),
         reviewer_type=payload.reviewer_type,
-        feedback_type=payload.feedback_type,
+        feedback_reason=payload.feedback_reason,
     )
 
     return FeedbackResponse(

@@ -1,10 +1,11 @@
--- message_feedback.feedback_type (Postgres check: message_feedback_feedback_type_check)
--- Allowed ONLY (do not add thumbs_up / thumbs_down):
+-- message_feedback.feedback_reason (category / orchestrator enum)
+-- Allowed values (do not store thumbs_up / thumbs_down here):
 --   biased, incomplete_instructions, not_factual, not_relevant, other, style_tone, unsafe
 --
--- Rating (thumbs) lives in metadata.rating, not feedback_type.
--- Thumbs up:  feedback=1, feedback_type=NULL, preference_score=5, metadata.rating=thumbs_up
--- Thumbs down + reason: feedback=-1, feedback_type=<reason enum>, metadata.rating=thumbs_down,
---   metadata.reason=<same enum>
+-- Thumbs rating lives in metadata.rating (no separate rating column).
 --
--- Cleanup bad historical rows: sql/message_feedback_cleanup_thumbs.sql
+-- Thumbs up:
+--   feedback=1, feedback_reason=NULL, preference_score=5, metadata={"rating":"thumbs_up"}
+-- Thumbs down + reason:
+--   feedback=-1, feedback_reason=not_factual, preference_score=1,
+--   metadata={"rating":"thumbs_down"}, feedback_comment=...

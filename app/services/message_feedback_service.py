@@ -17,17 +17,15 @@ from app.services.chat_history_service import (
 )
 from app.services.time_util import format_iso_est
 
-FEEDBACK_COLUMNS = (
-    "id,message_id,conversation_id,user_id,feedback,feedback_type,preference_score,"
+FEEDBACK_SELECT_COLUMNS = (
+    "id,message_id,conversation_id,user_id,feedback,feedback_reason,preference_score,"
     "reviewer_type,model,prompt_version,route,feedback_comment,labeler_notes,metadata,created_at"
 )
 
 REVIEWER_END_USER = "end_user"
-RATING_TO_FEEDBACK = {"thumbs_up": 1, "thumbs_down": -1}
-RATING_TO_PREFERENCE_DEFAULT = {"thumbs_up": 5, "thumbs_down": 1}
 
-# Matches Supabase ``message_feedback_feedback_type_check`` (orchestrator enum).
-DB_FEEDBACK_TYPES = frozenset(
+# Matches Supabase ``message_feedback`` reason check (orchestrator enum).
+DB_FEEDBACK_REASONS = frozenset(
     {
         "biased",
         "incomplete_instructions",
@@ -38,26 +36,24 @@ DB_FEEDBACK_TYPES = frozenset(
         "unsafe",
     }
 )
-UI_THUMBS_FEEDBACK_TYPES = frozenset({"thumbs_up", "thumbs_down"})
+UI_THUMBS_RATINGS = frozenset({"thumbs_up", "thumbs_down"})
 
 
-def _prepare_feedback_type_for_db(
-    feedback_type: str | None,
+def _prepare_feedback_reason_for_db(
+    feedback_reason: str | None,
     metadata: dict[str, Any] | None,
 ) -> tuple[str | None, dict[str, Any]]:
-    """Normalize client ``feedback_type``; never persist thumbs or unknown labels on the column."""
+    """Normalize reason; thumbs ratings live in ``metadata.rating`` only."""
     meta = dict(metadata or {})
-    raw = (feedback_type or "").strip()
+    raw = (feedback_reason or "").strip()
     if not raw:
         return None, meta
-    if raw in UI_THUMBS_FEEDBACK_TYPES:
+    if raw in UI_THUMBS_RATINGS:
         meta.setdefault("rating", raw)
         return None, meta
-    if raw in DB_FEEDBACK_TYPES:
-        if meta.get("rating") == "thumbs_down":
-            meta.setdefault("reason", raw)
+    if raw in DB_FEEDBACK_REASONS:
         return raw, meta
-    meta.setdefault("raw_feedback_type", raw)
+    meta.setdefault("raw_feedback_reason", raw)
     return "other", meta
 
 
@@ -78,7 +74,7 @@ def _row_to_feedback(row: dict[str, Any]) -> dict[str, Any]:
         out["user_id"] = row["user_id"]
     for key in (
         "feedback",
-        "feedback_type",
+        "feedback_reason",
         "preference_score",
         "reviewer_type",
         "model",
@@ -93,6 +89,8 @@ def _row_to_feedback(row: dict[str, Any]) -> dict[str, Any]:
     metadata = row.get("metadata")
     if isinstance(metadata, dict) and metadata:
         out["metadata"] = metadata
+        if metadata.get("rating"):
+            out["rating"] = metadata["rating"]
     return out
 
 
@@ -129,7 +127,7 @@ def insert_message_feedback(
     message_id: str,
     conversation_id: str,
     reviewer_type: str = REVIEWER_END_USER,
-    feedback_type: str | None = None,
+    feedback_reason: str | None = None,
     feedback: int | None = None,
     preference_score: int | None = None,
     model: str | None = None,
@@ -150,7 +148,7 @@ def insert_message_feedback(
     if preference_score is not None and not (1 <= preference_score <= 5):
         raise HTTPException(status_code=400, detail="preference_score must be between 1 and 5")
 
-    db_feedback_type, db_metadata = _prepare_feedback_type_for_db(feedback_type, metadata)
+    db_reason, db_metadata = _prepare_feedback_reason_for_db(feedback_reason, metadata)
 
     insert: dict[str, Any] = {
         "id": str(uuid.uuid4()),
@@ -162,8 +160,8 @@ def insert_message_feedback(
     }
     if feedback is not None:
         insert["feedback"] = feedback
-    if db_feedback_type:
-        insert["feedback_type"] = db_feedback_type
+    if db_reason:
+        insert["feedback_reason"] = db_reason
     if preference_score is not None:
         insert["preference_score"] = preference_score
     if model and model.strip():
@@ -181,7 +179,7 @@ def insert_message_feedback(
         result = (
             _table(access_token, "message_feedback")
             .insert(insert)
-            .select("id,message_id,conversation_id,user_id,feedback,feedback_type,preference_score,reviewer_type,model,route,prompt_version,feedback_comment,labeler_notes,metadata,created_at")
+            .select(FEEDBACK_SELECT_COLUMNS)
             .execute()
         )
     except Exception as exc:

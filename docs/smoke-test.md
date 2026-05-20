@@ -122,9 +122,7 @@ curl -sS -X POST "http://192.168.86.179:30185/api/feedback" \
   }' | jq .
 ```
 
-**Thumbs down** (`feedback_type` = reason enum, e.g. `not_factual`; `metadata.rating` = `thumbs_down`)
-
-After deploy, verify new rows never have `feedback_type` = `thumbs_up`. Clean old rows: `sql/message_feedback_cleanup_thumbs.sql`.
+**Thumbs down** (`feedback_reason` = e.g. `not_factual`; `metadata.rating` = `thumbs_down`)
 
 ```bash
 curl -sS -X POST "http://192.168.86.179:30185/api/feedback" \
@@ -134,7 +132,7 @@ curl -sS -X POST "http://192.168.86.179:30185/api/feedback" \
     "message_id": "<assistant_message_uuid>",
     "conversation_id": "<conversation_uuid>",
     "rating": "thumbs_down",
-    "feedback_type": "not_factual",
+    "feedback_reason": "not_factual",
     "comment": "Smoke test comment",
     "question": "Original question text",
     "trace_id": "smoke-trace-001"
