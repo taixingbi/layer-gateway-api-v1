@@ -14,11 +14,14 @@ from app.deps.auth_bearer import parse_bearer
 from app.schemas.chat_request import ChatRequest
 from app.services.chat_history_service import (
     ChatHistoryUnavailable,
+    MESSAGE_STATUS_COMPLETE,
     append_message,
+    assistant_message_metadata,
     ensure_conversation,
     load_messages,
     merge_history,
     persistence_enabled,
+    _model_from_usage,
 )
 from app.schemas.history import ChatHistoryMessage
 from app.schemas.chat_response import ChatResponse, ErrorDetails, Usage
@@ -33,17 +36,62 @@ from app.services.orchestrator_call_context import OrchestratorCallContext
 
 def _gateway_sse_chunk_token_text(chunk: str) -> str | None:
     """Parse ``event: token`` / ``data: {...}`` frame produced by ``OrchestratorClient``."""
+    event_name = "message"
+    data_raw: str | None = None
     for line in chunk.splitlines():
-        if line.startswith("data:"):
-            raw = line[5:].strip()
-            try:
-                obj = json.loads(raw)
-            except json.JSONDecodeError:
-                return raw
-            if isinstance(obj, dict):
-                return str(obj.get("text") or obj.get("token") or "")
-            return str(obj)
+        if line.startswith("event:"):
+            event_name = line[6:].strip().lower()
+        elif line.startswith("data:"):
+            data_raw = line[5:].strip()
+    if event_name != "token" or not data_raw:
+        return None
+    try:
+        obj = json.loads(data_raw)
+    except json.JSONDecodeError:
+        return data_raw
+    if isinstance(obj, dict):
+        text = obj.get("text") or obj.get("token") or ""
+        return str(text) if text else None
+    return str(obj)
+
+
+def _gateway_sse_chunk_event_data(chunk: str) -> tuple[str, str | None]:
+    """Return (event name, data payload) from one SSE frame."""
+    event_name = "message"
+    data_raw: str | None = None
+    for line in chunk.splitlines():
+        if line.startswith("event:"):
+            event_name = line[6:].strip().lower()
+        elif line.startswith("data:"):
+            data_raw = line[5:].strip()
+    return event_name, data_raw
+
+
+def _gateway_sse_chunk_rewrite_text(chunk: str) -> str | None:
+    """Parse ``event: rewrite`` text for assistant message metadata."""
+    event_name, data_raw = _gateway_sse_chunk_event_data(chunk)
+    if event_name != "rewrite" or not data_raw:
+        return None
+    try:
+        obj = json.loads(data_raw)
+    except json.JSONDecodeError:
+        return None
+    if isinstance(obj, dict):
+        text = obj.get("text")
+        return text.strip() if isinstance(text, str) and text.strip() else None
     return None
+
+
+def _gateway_sse_chunk_done_payload(chunk: str) -> dict[str, Any] | None:
+    """Parse ``event: done`` data JSON from a gateway SSE frame."""
+    event_name, data_raw = _gateway_sse_chunk_event_data(chunk)
+    if event_name != "done" or not data_raw:
+        return None
+    try:
+        parsed = json.loads(data_raw)
+    except json.JSONDecodeError:
+        return None
+    return parsed if isinstance(parsed, dict) else None
 
 
 def _upstream_token_text_is_internal_context_error(text: str) -> bool:
@@ -154,7 +202,14 @@ def _prepare_chat_history(request: Request, payload: ChatRequest) -> None:
         request.state.conversation_id = conv_id
         db_history = load_messages(access_token, user_id, conv_id)
         payload.history = merge_history(db_history, payload.history)
-        append_message(access_token, user_id, conv_id, "user", payload.message)
+        append_message(
+            access_token,
+            user_id,
+            conv_id,
+            "user",
+            payload.message,
+            status=MESSAGE_STATUS_COMPLETE,
+        )
         request.state.chat_history_access_token = access_token
         request.state.chat_history_user_id = user_id
         request.state.chat_history_conversation_id = conv_id
@@ -167,7 +222,15 @@ def _prepare_chat_history(request: Request, payload: ChatRequest) -> None:
         )
 
 
-def _persist_assistant_message(request: Request, answer: str) -> None:
+def _persist_assistant_message(
+    request: Request,
+    answer: str,
+    *,
+    rewrite: str | None = None,
+    citations: list[dict[str, Any]] | None = None,
+    follow_up_questions: list[str] | None = None,
+    usage: dict[str, Any] | None = None,
+) -> None:
     """Insert assistant turn after successful orchestrator response."""
     conv_id = getattr(request.state, "chat_history_conversation_id", None)
     token = getattr(request.state, "chat_history_access_token", None)
@@ -177,8 +240,23 @@ def _persist_assistant_message(request: Request, answer: str) -> None:
     text = (answer or "").strip()
     if not text:
         return
+    metadata = assistant_message_metadata(
+        rewrite=rewrite,
+        citations=citations,
+        follow_up_questions=follow_up_questions,
+        model=_model_from_usage(usage)
+        or (get_settings().chat_assistant_model.strip() or None),
+    )
     try:
-        append_message(token, user_id, conv_id, "assistant", text)
+        append_message(
+            token,
+            user_id,
+            conv_id,
+            "assistant",
+            text,
+            status=MESSAGE_STATUS_COMPLETE,
+            metadata=metadata,
+        )
     except ChatHistoryUnavailable:
         pass
 
@@ -289,7 +367,14 @@ async def chat(request: Request, payload: ChatRequest):
         ctx = _build_call_context(request, orchestrator_payload, stream=False)
         result = await client.chat(orchestrator_payload, ctx)
         log_event("orchestrator_call_succeeded", **_chat_correlation_log_kwargs(request))
-        _persist_assistant_message(request, result.answer)
+        _persist_assistant_message(
+            request,
+            result.answer,
+            rewrite=getattr(result, "rewrite", None),
+            citations=result.citations,
+            follow_up_questions=getattr(result, "follow_up_questions", None) or [],
+            usage=result.usage,
+        )
         conv_id = getattr(request.state, "conversation_id", None)
         body = ChatResponse(
             status="success",
@@ -332,6 +417,9 @@ async def _stream_response(request: Request, orchestrator_payload: OrchestratorC
     stream_failed = False
     upstream_done_sent = False
     assistant_parts: list[str] = []
+    stream_rewrite: str | None = None
+    stream_citations: list[dict[str, Any]] = []
+    stream_follow_ups: list[str] = []
     try:
         # Forward normalized token events from orchestrator stream.
         async for token_event in client.stream_chat(orchestrator_payload, ctx):
@@ -340,6 +428,17 @@ async def _stream_response(request: Request, orchestrator_payload: OrchestratorC
                 upstream_first = False
             if token_event.lstrip().startswith("event: done"):
                 upstream_done_sent = True
+                done_payload = _gateway_sse_chunk_done_payload(token_event)
+                if done_payload:
+                    rewrite_val = done_payload.get("rewrite")
+                    if isinstance(rewrite_val, str) and rewrite_val.strip():
+                        stream_rewrite = rewrite_val.strip()
+                    cites = done_payload.get("citations")
+                    if isinstance(cites, list):
+                        stream_citations = [c for c in cites if isinstance(c, dict)]
+                    follow = done_payload.get("follow_up_questions")
+                    if isinstance(follow, list):
+                        stream_follow_ups = [str(q) for q in follow if q]
                 yield token_event
                 continue
             token_text = _gateway_sse_chunk_token_text(token_event)
@@ -356,13 +455,23 @@ async def _stream_response(request: Request, orchestrator_payload: OrchestratorC
                 break
             if token_text:
                 assistant_parts.append(token_text)
+            else:
+                rewrite_text = _gateway_sse_chunk_rewrite_text(token_event)
+                if rewrite_text:
+                    stream_rewrite = rewrite_text
             yield token_event
         if stream_failed:
             yield 'event: done\ndata: {"status":"error"}\n\n'
         else:
             if not upstream_done_sent:
                 yield "event: done\ndata: {\"status\":\"success\"}\n\n"
-            _persist_assistant_message(request, "".join(assistant_parts))
+            _persist_assistant_message(
+                request,
+                "".join(assistant_parts),
+                rewrite=stream_rewrite,
+                citations=stream_citations,
+                follow_up_questions=stream_follow_ups,
+            )
     except HTTPException as exc:
         # Convert mapped HTTP failures to stream-safe error envelope.
         payload = {"status": "error", "error": {"code": str(exc.status_code), "message": exc.detail}}

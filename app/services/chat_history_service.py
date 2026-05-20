@@ -14,7 +14,8 @@ from app.services.supabase_client import get_supabase_admin_client, get_supabase
 from app.services.time_util import format_iso_est
 
 CONVERSATION_COLUMNS = "id,user_id,title,created_at,updated_at"
-MESSAGE_COLUMNS = "id,conversation_id,role,content,created_at"
+MESSAGE_COLUMNS = "id,conversation_id,role,content,status,metadata,created_at"
+MESSAGE_STATUS_COMPLETE = "complete"
 TITLE_MAX_LEN = 80
 DEFAULT_LIST_LIMIT = 50
 MAX_LIST_LIMIT = 100
@@ -101,14 +102,52 @@ def _row_to_conversation_summary(row: dict) -> dict:
     }
 
 
+def assistant_message_metadata(
+    *,
+    rewrite: str | None = None,
+    citations: list[dict[str, Any]] | None = None,
+    follow_up_questions: list[str] | None = None,
+    model: str | None = None,
+) -> dict[str, Any] | None:
+    """Build optional ``metadata`` jsonb for assistant rows (omit when empty)."""
+    meta: dict[str, Any] = {}
+    if rewrite and rewrite.strip():
+        meta["rewrite"] = rewrite.strip()
+    if citations:
+        meta["citations"] = citations
+    if follow_up_questions:
+        meta["follow_up_questions"] = follow_up_questions
+    if model and model.strip():
+        meta["model"] = model.strip()
+    return meta or None
+
+
+def _model_from_usage(usage: dict[str, Any] | None) -> str | None:
+    """Extract model name from orchestrator usage payload when present."""
+    if not usage:
+        return None
+    for key in ("model", "model_name"):
+        value = usage.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
 def _row_to_message(row: dict) -> dict:
     """Serialize one message for API response."""
-    return {
+    out: dict[str, Any] = {
         "id": row.get("id"),
         "role": row["role"],
         "content": row["content"],
         "created_at": format_iso_est(row.get("created_at")),
     }
+    status = row.get("status")
+    if isinstance(status, str) and status.strip():
+        out["status"] = status.strip()
+    metadata = row.get("metadata")
+    if isinstance(metadata, dict) and metadata:
+        out["metadata"] = metadata
+    return out
 
 
 def ensure_conversation(
@@ -192,6 +231,9 @@ def append_message(
     conversation_id: str,
     role: str,
     content: str,
+    *,
+    status: str | None = MESSAGE_STATUS_COMPLETE,
+    metadata: dict[str, Any] | None = None,
 ) -> None:
     """Insert one message row; conversation updated_at bumped by DB trigger when present."""
     if not persistence_enabled():
@@ -205,7 +247,11 @@ def append_message(
 
     cid = _validate_uuid(conversation_id)
     _assert_conversation_owned(access_token, user_id, cid)
-    insert = {"conversation_id": cid, "role": role, "content": text}
+    insert: dict[str, Any] = {"conversation_id": cid, "role": role, "content": text}
+    if status is not None:
+        insert["status"] = status
+    if metadata is not None:
+        insert["metadata"] = metadata
     try:
         _table(access_token, "messages").insert(insert).execute()
     except Exception as exc:

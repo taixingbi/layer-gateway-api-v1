@@ -1,6 +1,10 @@
 -- Row-level security for conversations and messages (run in Supabase SQL editor).
 -- Assumes tables already exist per project ERD.
 
+-- Message enrichment columns (safe to re-run)
+alter table public.messages add column if not exists metadata jsonb;
+alter table public.messages add column if not exists status text;
+
 alter table public.conversations enable row level security;
 alter table public.messages enable row level security;
 

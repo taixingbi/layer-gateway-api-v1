@@ -70,7 +70,7 @@ When Supabase is configured:
 1. Resolve or mint `conversation_id` (UUID) owned by `auth_context.user_id`.
 2. Load prior messages from `messages`; merge with client `history` (append client tail beyond DB length).
 3. Insert the user message before calling the orchestrator.
-4. On successful response (JSON or stream `done`), insert the assistant message.
+4. On successful response (JSON or stream `done`), insert the assistant message with `status: complete` and optional `metadata` (`rewrite`, `citations`, `follow_up_questions`, `model` from upstream / `CHAT_ASSISTANT_MODEL`).
 5. Return `conversation_id` in JSON body and stream `meta` when set.
 
 If Supabase is unavailable, chat proceeds without persistence (`chat_history_skipped` log).

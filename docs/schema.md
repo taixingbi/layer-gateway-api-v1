@@ -352,9 +352,11 @@ Upstream non-stream JSON (`OrchestratorChatResponse`): `answer`, `citations`, `f
 |-------|------|-------------|
 | `conversation_id` | string | UUID path parameter |
 | `messages` | array | Ordered by `created_at` ascending |
-| `messages[].id` | integer | Optional message id |
+| `messages[].id` | string (UUID) | Message id |
 | `messages[].role` | string | `user` or `assistant` |
 | `messages[].content` | string | Message text |
+| `messages[].status` | string | Optional; assistant rows use `complete` |
+| `messages[].metadata` | object | Optional jsonb; assistant may include `rewrite`, `citations`, `follow_up_questions`, `model` |
 | `messages[].created_at` | string | Optional ISO 8601 (EST) |
 
 | Status | When |

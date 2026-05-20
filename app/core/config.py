@@ -51,6 +51,7 @@ class Settings(BaseSettings):
     jwt_expiry_seconds: int = 3600
 
     chat_message_max_length: int = 4000
+    chat_assistant_model: str = ""
 
     @property
     def supabase_enabled(self) -> bool:

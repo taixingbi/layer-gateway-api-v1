@@ -60,9 +60,17 @@ def test_conversation_messages(mock_messages, mock_verify):
         plan="free",
     )
     cid = str(uuid.uuid4())
+    msg_id = str(uuid.uuid4())
     mock_messages.return_value = [
-        {"id": 1, "role": "user", "content": "Hi", "created_at": None},
-        {"id": 2, "role": "assistant", "content": "Hey", "created_at": None},
+        {"id": str(uuid.uuid4()), "role": "user", "content": "Hi", "status": "complete", "created_at": None},
+        {
+            "id": msg_id,
+            "role": "assistant",
+            "content": "H4 EAD.",
+            "status": "complete",
+            "metadata": {"rewrite": "visa?", "citations": [{"source": "personal_profile"}]},
+            "created_at": "2026-05-20T12:59:33-04:00",
+        },
     ]
 
     app = create_app()
@@ -75,3 +83,5 @@ def test_conversation_messages(mock_messages, mock_verify):
     data = response.json()
     assert data["conversation_id"] == cid
     assert len(data["messages"]) == 2
+    assert data["messages"][1]["status"] == "complete"
+    assert data["messages"][1]["metadata"]["rewrite"] == "visa?"

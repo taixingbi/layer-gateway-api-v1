@@ -29,9 +29,11 @@ class StoredMessage(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    id: int | None = None
+    id: str | None = None
     role: str
     content: str
+    status: str | None = None
+    metadata: dict[str, Any] | None = None
     created_at: str | None = None
 
 
