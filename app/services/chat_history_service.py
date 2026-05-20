@@ -158,6 +158,42 @@ def _model_from_usage(usage: dict[str, Any] | None) -> str | None:
     return None
 
 
+def _model_from_done_payload(done: dict[str, Any] | None) -> str | None:
+    """Read model from upstream SSE/JSON ``done`` body when present."""
+    if not done:
+        return None
+    for key in ("model", "model_name"):
+        value = done.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    usage = done.get("usage")
+    if isinstance(usage, dict):
+        return _model_from_usage(usage)
+    return None
+
+
+def resolve_assistant_model_name(
+    *,
+    explicit: str | None = None,
+    message_metadata_model: str | None = None,
+    usage: dict[str, Any] | None = None,
+    done_payload: dict[str, Any] | None = None,
+) -> str | None:
+    """Best-effort model name for messages and feedback (env ``CHAT_ASSISTANT_MODEL`` last)."""
+    from app.core.config import get_settings
+
+    for candidate in (
+        explicit,
+        message_metadata_model,
+        _model_from_done_payload(done_payload),
+        _model_from_usage(usage),
+        (get_settings().chat_assistant_model or "").strip() or None,
+    ):
+        if isinstance(candidate, str) and candidate.strip():
+            return candidate.strip()
+    return None
+
+
 def _row_to_message(row: dict) -> dict:
     """Serialize one message for API response."""
     out: dict[str, Any] = {

@@ -37,16 +37,15 @@ def test_prepare_feedback_reason_unknown_maps_to_other():
     assert meta["raw_feedback_reason"] == "hallucination"
 
 
-@patch("app.services.message_feedback_service.get_settings")
+@patch("app.services.message_feedback_service.resolve_assistant_model_name", return_value="qwen2.5-7b")
 @patch("app.services.message_feedback_service._model_route_from_message")
 @patch("app.services.message_feedback_service.persistence_enabled", return_value=True)
 @patch("app.services.message_feedback_service._assert_conversation_owned")
 @patch("app.services.message_feedback_service._table")
-def test_insert_backfills_model_route(mock_table, _owned, _enabled, mock_ctx, mock_settings):
+def test_insert_backfills_model_route(mock_table, _owned, _enabled, mock_ctx, _resolve_model):
     cid = str(uuid.uuid4())
     mid = str(uuid.uuid4())
-    mock_ctx.return_value = ("qwen2.5-7b", "rag")
-    mock_settings.return_value.chat_assistant_model = ""
+    mock_ctx.return_value = (None, "rag")
     mock_msg = MagicMock()
     mock_msg.execute.return_value = MagicMock(data=[{"id": mid}])
     chain = mock_table.return_value.select.return_value

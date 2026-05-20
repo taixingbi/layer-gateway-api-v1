@@ -22,6 +22,7 @@ from app.services.chat_history_service import (
     message_persist_status,
     persistence_enabled,
     _model_from_usage,
+    resolve_assistant_model_name,
 )
 from app.schemas.history import ChatHistoryMessage
 from app.schemas.chat_response import ChatResponse, ErrorDetails, Usage
@@ -231,6 +232,7 @@ def _persist_assistant_message(
     citations: list[dict[str, Any]] | None = None,
     follow_up_questions: list[str] | None = None,
     usage: dict[str, Any] | None = None,
+    done_payload: dict[str, Any] | None = None,
 ) -> str | None:
     """Insert assistant turn after successful orchestrator response; return message id."""
     conv_id = getattr(request.state, "chat_history_conversation_id", None)
@@ -245,8 +247,7 @@ def _persist_assistant_message(
         rewrite=rewrite,
         citations=citations,
         follow_up_questions=follow_up_questions,
-        model=_model_from_usage(usage)
-        or (get_settings().chat_assistant_model.strip() or None),
+        model=resolve_assistant_model_name(usage=usage, done_payload=done_payload),
     )
     try:
         msg_id = append_message(
@@ -480,12 +481,16 @@ async def _stream_response(request: Request, orchestrator_payload: OrchestratorC
         if stream_failed:
             yield 'event: done\ndata: {"status":"error"}\n\n'
         else:
+            done_for_model = pending_done_body if isinstance(pending_done_body, dict) else None
+            stream_model = resolve_assistant_model_name(done_payload=done_for_model)
             stream_assistant_message_id = _persist_assistant_message(
                 request,
                 "".join(assistant_parts),
                 rewrite=stream_rewrite,
                 citations=stream_citations,
                 follow_up_questions=stream_follow_ups,
+                usage=done_for_model.get("usage") if isinstance(done_for_model.get("usage"), dict) else None,
+                done_payload=done_for_model,
             )
             if stream_assistant_message_id or stream_cid:
                 late_meta: dict[str, Any] = {}
@@ -493,8 +498,12 @@ async def _stream_response(request: Request, orchestrator_payload: OrchestratorC
                     late_meta["conversation_id"] = stream_cid
                 if stream_assistant_message_id:
                     late_meta["assistant_message_id"] = stream_assistant_message_id
+                if stream_model:
+                    late_meta["model"] = stream_model
                 yield f"event: meta\ndata: {json.dumps(late_meta)}\n\n"
             done_body = pending_done_body if upstream_done_sent else {"status": "success"}
+            if stream_model and not done_body.get("model"):
+                done_body["model"] = stream_model
             if stream_assistant_message_id:
                 done_body["assistant_message_id"] = stream_assistant_message_id
             if stream_rewrite and not done_body.get("rewrite"):

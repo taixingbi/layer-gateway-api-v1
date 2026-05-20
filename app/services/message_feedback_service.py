@@ -7,7 +7,6 @@ from typing import Any
 
 from fastapi import HTTPException
 
-from app.core.config import get_settings
 from app.services.chat_history_service import (
     ChatHistoryUnavailable,
     _assert_conversation_owned,
@@ -16,6 +15,7 @@ from app.services.chat_history_service import (
     _validate_uuid,
     default_chat_route_label,
     persistence_enabled,
+    resolve_assistant_model_name,
 )
 from app.services.time_util import format_iso_est
 
@@ -162,9 +162,10 @@ def _resolve_model_route_for_feedback(
 ) -> tuple[str | None, str | None]:
     """Prefer explicit body fields; else assistant message metadata; else gateway defaults."""
     msg_model, msg_route = _model_route_from_message(access_token, message_id, conversation_id)
-    resolved_model = (model or "").strip() or msg_model
-    if not resolved_model:
-        resolved_model = (get_settings().chat_assistant_model or "").strip() or None
+    resolved_model = resolve_assistant_model_name(
+        explicit=(model or "").strip() or None,
+        message_metadata_model=msg_model,
+    )
     resolved_route = (route or "").strip() or msg_route or default_chat_route_label()
     return resolved_model, resolved_route
 
@@ -201,6 +202,8 @@ def insert_message_feedback(
         raise HTTPException(status_code=400, detail="preference_score must be between 1 and 5")
 
     db_reason, db_metadata = _prepare_feedback_reason_for_db(feedback_reason, metadata)
+    if model:
+        db_metadata.setdefault("model", model)
 
     insert: dict[str, Any] = {
         "id": str(uuid.uuid4()),

@@ -13,6 +13,7 @@ from app.services.chat_history_service import (
     assistant_message_metadata,
     ensure_conversation,
     merge_history,
+    resolve_assistant_model_name,
     _validate_uuid,
 )
 
@@ -37,6 +38,12 @@ def test_merge_history_returns_db_when_client_shorter():
     ]
     client = [ChatHistoryMessage(role="user", content="x")]
     assert merge_history(db, client) == db
+
+
+@patch("app.core.config.get_settings")
+def test_resolve_assistant_model_name_prefers_env_when_no_upstream(mock_settings):
+    mock_settings.return_value.chat_assistant_model = "qwen2.5-7b"
+    assert resolve_assistant_model_name() == "qwen2.5-7b"
 
 
 def test_assistant_message_metadata_omits_empty_fields():
