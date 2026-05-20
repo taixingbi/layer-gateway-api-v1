@@ -14,12 +14,12 @@ from app.deps.auth_bearer import parse_bearer
 from app.schemas.chat_request import ChatRequest
 from app.services.chat_history_service import (
     ChatHistoryUnavailable,
-    MESSAGE_STATUS_COMPLETE,
     append_message,
     assistant_message_metadata,
     ensure_conversation,
     load_messages,
     merge_history,
+    message_persist_status,
     persistence_enabled,
     _model_from_usage,
 )
@@ -208,7 +208,7 @@ def _prepare_chat_history(request: Request, payload: ChatRequest) -> None:
             conv_id,
             "user",
             payload.message,
-            status=MESSAGE_STATUS_COMPLETE,
+            status=message_persist_status(),
         )
         request.state.chat_history_access_token = access_token
         request.state.chat_history_user_id = user_id
@@ -254,7 +254,7 @@ def _persist_assistant_message(
             conv_id,
             "assistant",
             text,
-            status=MESSAGE_STATUS_COMPLETE,
+            status=message_persist_status(),
             metadata=metadata,
         )
     except ChatHistoryUnavailable:

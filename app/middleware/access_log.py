@@ -52,6 +52,10 @@ def _emit_request_complete(
     }
     if ttfb_ms is not None:
         fields["ttfb_ms"] = round(ttfb_ms, 3)
+    if status_code >= 400:
+        error_detail = getattr(request.state, "error_detail", None)
+        if error_detail:
+            fields["error_detail"] = error_detail
 
     log_event("request_complete", **_omit_none_values(fields))
 

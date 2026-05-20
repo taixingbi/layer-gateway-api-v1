@@ -3,7 +3,8 @@
 from contextlib import asynccontextmanager
 
 import httpx
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse
 
 from app.core.config import get_settings
 from app.core.logging import configure_logging, log_event
@@ -60,6 +61,27 @@ def create_app() -> FastAPI:
     configure_logging(settings.env)
 
     app = FastAPI(title=settings.app_name, lifespan=lifespan)
+
+    @app.exception_handler(HTTPException)
+    async def log_http_exception(request: Request, exc: HTTPException) -> JSONResponse:
+        """Surface ``detail`` in structured logs (uvicorn access lines omit it)."""
+        detail = exc.detail
+        if not isinstance(detail, str):
+            detail = str(detail)
+        request.state.error_detail = detail
+        log_event(
+            "http_exception",
+            path=request.url.path,
+            method=request.method,
+            status=exc.status_code,
+            error_detail=detail,
+            request_id=getattr(request.state, "request_id", None),
+            trace_id=getattr(request.state, "trace_id", None),
+            session_id=getattr(request.state, "session_id", None),
+            conversation_id=getattr(request.state, "conversation_id", None),
+        )
+        return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+
     # Order: last added = outermost on request. Target: request_id → access log → auth → inflight → routes.
     app.add_middleware(InflightLimitMiddleware)
     app.add_middleware(AuthMiddleware)

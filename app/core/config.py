@@ -52,6 +52,8 @@ class Settings(BaseSettings):
 
     chat_message_max_length: int = 4000
     chat_assistant_model: str = ""
+    # Set true only after ``alter table messages add column status text`` in Supabase.
+    chat_persist_message_status: bool = False
 
     @property
     def supabase_enabled(self) -> bool:

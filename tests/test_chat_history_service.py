@@ -72,7 +72,7 @@ def test_append_message_writes_status_and_metadata(mock_table, _owned, _enabled)
         "H4 EAD.",
         status=MESSAGE_STATUS_COMPLETE,
         metadata={"rewrite": "visa?", "citations": []},
-    )
+    )  # status passed explicitly for insert assertion
     insert_row = mock_table.return_value.insert.call_args[0][0]
     assert insert_row["status"] == MESSAGE_STATUS_COMPLETE
     assert insert_row["metadata"]["rewrite"] == "visa?"

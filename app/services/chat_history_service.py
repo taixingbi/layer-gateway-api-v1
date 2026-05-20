@@ -14,8 +14,21 @@ from app.services.supabase_client import get_supabase_admin_client, get_supabase
 from app.services.time_util import format_iso_est
 
 CONVERSATION_COLUMNS = "id,user_id,title,created_at,updated_at"
-MESSAGE_COLUMNS = "id,conversation_id,role,content,status,metadata,created_at"
 MESSAGE_STATUS_COMPLETE = "complete"
+
+
+def _message_columns() -> str:
+    """PostgREST select list; ``status`` only when the column exists in Supabase."""
+    cols = ["id", "conversation_id", "role", "content"]
+    if get_settings().chat_persist_message_status:
+        cols.append("status")
+    cols.extend(["metadata", "created_at"])
+    return ",".join(cols)
+
+
+def message_persist_status() -> str | None:
+    """Status value for inserts, or None when the DB has no ``status`` column."""
+    return MESSAGE_STATUS_COMPLETE if get_settings().chat_persist_message_status else None
 TITLE_MAX_LEN = 80
 DEFAULT_LIST_LIMIT = 50
 MAX_LIST_LIMIT = 100
@@ -207,7 +220,7 @@ def load_messages(
     try:
         result = (
             _table(access_token, "messages")
-            .select(MESSAGE_COLUMNS)
+            .select(_message_columns())
             .eq("conversation_id", cid)
             .order("created_at", desc=False)
             .execute()
@@ -232,7 +245,7 @@ def append_message(
     role: str,
     content: str,
     *,
-    status: str | None = MESSAGE_STATUS_COMPLETE,
+    status: str | None = None,
     metadata: dict[str, Any] | None = None,
 ) -> None:
     """Insert one message row; conversation updated_at bumped by DB trigger when present."""
@@ -297,7 +310,7 @@ def list_messages_for_api(
     try:
         result = (
             _table(access_token, "messages")
-            .select(MESSAGE_COLUMNS)
+            .select(_message_columns())
             .eq("conversation_id", cid)
             .order("created_at", desc=False)
             .execute()
