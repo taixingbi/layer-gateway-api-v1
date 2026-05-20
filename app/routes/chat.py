@@ -493,6 +493,11 @@ async def _stream_response(request: Request, orchestrator_payload: OrchestratorC
             yield 'event: done\ndata: {"status":"error"}\n\n'
         else:
             done_for_model = pending_done_body if isinstance(pending_done_body, dict) else None
+            stream_usage = (
+                done_for_model.get("usage")
+                if isinstance(done_for_model, dict) and isinstance(done_for_model.get("usage"), dict)
+                else None
+            )
             stream_model = resolve_assistant_model_name(done_payload=done_for_model)
             stream_assistant_message_id = _persist_assistant_message(
                 request,
@@ -500,7 +505,7 @@ async def _stream_response(request: Request, orchestrator_payload: OrchestratorC
                 rewrite=stream_rewrite,
                 citations=stream_citations,
                 follow_up_questions=stream_follow_ups,
-                usage=done_for_model.get("usage") if isinstance(done_for_model.get("usage"), dict) else None,
+                usage=stream_usage,
                 done_payload=done_for_model,
             )
             if stream_assistant_message_id or stream_cid:
@@ -512,7 +517,11 @@ async def _stream_response(request: Request, orchestrator_payload: OrchestratorC
                 if stream_model:
                     late_meta["model"] = stream_model
                 yield f"event: meta\ndata: {json.dumps(late_meta)}\n\n"
-            done_body = pending_done_body if upstream_done_sent else {"status": "success"}
+            done_body = (
+                dict(pending_done_body)
+                if isinstance(pending_done_body, dict)
+                else {"status": "success"}
+            )
             if stream_model and not done_body.get("model"):
                 done_body["model"] = stream_model
             if stream_assistant_message_id:

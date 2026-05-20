@@ -10,6 +10,7 @@ from app.core.config import get_settings
 from app.main import create_app
 from app.routes.chat import _gateway_sse_chunk_token_text
 from app.schemas.history import ChatHistoryMessage
+from app.services.chat_history_service import default_chat_route_label
 
 
 @pytest.fixture(autouse=True)
@@ -149,7 +150,7 @@ def test_chat_stream_persists_assistant_without_rewrite(
     meta = mock_append.call_args_list[1].kwargs["metadata"]
     assert meta["rewrite"] == "how are you?"
     assert meta["citations"] == [{"source": "personal_profile"}]
-    assert meta["route"] == "rag"
+    assert meta["route"] == default_chat_route_label()
 
 
 @patch("app.routes.chat.persistence_enabled", return_value=False)
