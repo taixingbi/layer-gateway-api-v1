@@ -219,9 +219,11 @@ Persists to Supabase **`message_feedback`** when configured. Optionally proxies 
 | `labeler_notes` | string | No | RLHF / QA notes |
 | `metadata` | object | No | Extra jsonb (latency, retrieval_chunks, …) |
 | `rating` | string | No | Legacy UI: `thumbs_up` / `thumbs_down` |
-| `trace_id` | string | No | Legacy orchestrator correlation |
+| `trace_id` | string | No | Legacy orchestrator correlation (alias: `run_id` from web BFF) |
 | `request_id` | string | No | Legacy chat request id |
 | `question` | string | No | Stored in `metadata.question` when set |
+
+Unknown keys (e.g. UI `reason`) are ignored. `message_id` / `conversation_id` may use a `db-` prefix from the chat UI.
 
 Example:
 

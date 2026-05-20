@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 
 import httpx
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 from app.core.config import get_settings
@@ -61,6 +62,28 @@ def create_app() -> FastAPI:
     configure_logging(settings.env)
 
     app = FastAPI(title=settings.app_name, lifespan=lifespan)
+
+    @app.exception_handler(RequestValidationError)
+    async def log_request_validation_error(
+        request: Request, exc: RequestValidationError
+    ) -> JSONResponse:
+        """Log validation failures so access logs include ``error_detail``."""
+        parts: list[str] = []
+        for err in exc.errors()[:8]:
+            loc = ".".join(str(x) for x in err.get("loc", ()))
+            parts.append(f"{loc}: {err.get('msg', 'invalid')}")
+        detail = "; ".join(parts) if parts else "validation failed"
+        request.state.error_detail = detail
+        log_event(
+            "request_validation_error",
+            path=request.url.path,
+            method=request.method,
+            status=422,
+            error_detail=detail,
+            request_id=getattr(request.state, "request_id", None),
+            trace_id=getattr(request.state, "trace_id", None),
+        )
+        return JSONResponse(status_code=422, content={"detail": exc.errors()})
 
     @app.exception_handler(HTTPException)
     async def log_http_exception(request: Request, exc: HTTPException) -> JSONResponse:

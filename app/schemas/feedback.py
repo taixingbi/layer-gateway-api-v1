@@ -2,13 +2,30 @@
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+
+def _strip_db_uuid_prefix(value: str) -> str:
+    """Accept UI ids like ``db-<uuid>`` in addition to raw UUID strings."""
+    s = value.strip()
+    if s.startswith("db-") and len(s) > 3:
+        return s[3:].strip()
+    return s
+
+
+def _empty_str_to_none(value: str | None) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        stripped = value.strip()
+        return stripped if stripped else None
+    return value
 
 
 class FeedbackRequest(BaseModel):
     """Message-level feedback (Supabase) with optional legacy orchestrator fields."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
     message_id: str = Field(min_length=3, max_length=128)
     conversation_id: str = Field(min_length=3, max_length=128)
@@ -21,14 +38,53 @@ class FeedbackRequest(BaseModel):
     prompt_version: str | None = Field(default=None, max_length=64)
     feedback_comment: str | None = Field(default=None, max_length=4000)
     labeler_notes: str | None = Field(default=None, max_length=4000)
-    metadata: dict[str, Any] = Field(default_factory=dict)
+    metadata: dict[str, Any] | None = None
 
     # Legacy orchestrator proxy (optional when persisting to Supabase)
-    trace_id: str | None = Field(default=None, min_length=1, max_length=128)
+    trace_id: str | None = Field(default=None, max_length=128)
     request_id: str | None = Field(default=None, max_length=128)
     rating: Literal["thumbs_up", "thumbs_down"] | None = None
     comment: str | None = Field(default=None, max_length=4000)
     question: str | None = Field(default=None, max_length=4000)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_incoming(cls, data: Any) -> Any:
+        """Map BFF/UI aliases and tolerate empty strings / null metadata."""
+        if not isinstance(data, dict):
+            return data
+        d = dict(data)
+        run_id = d.pop("run_id", None)
+        if run_id and not d.get("trace_id"):
+            d["trace_id"] = run_id
+        for key in ("trace_id", "request_id"):
+            if key in d:
+                d[key] = _empty_str_to_none(d[key])
+        if d.get("metadata") is None:
+            d["metadata"] = {}
+        for id_key in ("message_id", "conversation_id"):
+            val = d.get(id_key)
+            if isinstance(val, str):
+                d[id_key] = _strip_db_uuid_prefix(val)
+        return d
+
+    @field_validator("message_id", "conversation_id", mode="before")
+    @classmethod
+    def _normalize_ids(cls, value: Any) -> Any:
+        if isinstance(value, str):
+            return _strip_db_uuid_prefix(value)
+        return value
+
+    @field_validator("trace_id", "request_id", mode="before")
+    @classmethod
+    def _normalize_optional_ids(cls, value: Any) -> Any:
+        return _empty_str_to_none(value) if isinstance(value, str) else value
+
+    @model_validator(mode="after")
+    def _ensure_metadata_dict(self) -> "FeedbackRequest":
+        if self.metadata is None:
+            return self.model_copy(update={"metadata": {}})
+        return self
 
     @model_validator(mode="after")
     def _normalize_legacy_fields(self) -> "FeedbackRequest":
