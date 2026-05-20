@@ -31,28 +31,27 @@ def test_insert_message_feedback(mock_table, _owned, _enabled):
     chain.eq.return_value = chain
     chain.limit.return_value = mock_msg
 
-    mock_insert = MagicMock()
-    mock_insert.execute.return_value = MagicMock(
-        data=[
-            {
-                "id": fid,
-                "message_id": mid,
-                "conversation_id": cid,
-                "user_id": "user_001",
-                "feedback": -1,
-                "feedback_type": "hallucination",
-                "preference_score": 1,
-                "reviewer_type": "end_user",
-                "model": "qwen2.5-7b",
-                "route": "rag",
-                "feedback_comment": "Wrong visa answer",
-                "labeler_notes": None,
-                "metadata": {"latency_ms": 1820},
-                "created_at": "2026-05-20T13:20:11+00:00",
-            }
-        ]
-    )
-    mock_table.return_value.insert.return_value = mock_insert
+    row_data = {
+        "id": fid,
+        "message_id": mid,
+        "conversation_id": cid,
+        "user_id": "user_001",
+        "feedback": -1,
+        "feedback_type": "hallucination",
+        "preference_score": 1,
+        "reviewer_type": "end_user",
+        "model": "qwen2.5-7b",
+        "route": "rag",
+        "feedback_comment": "Wrong visa answer",
+        "labeler_notes": None,
+        "metadata": {"latency_ms": 1820},
+        "created_at": "2026-05-20T13:20:11+00:00",
+    }
+    mock_insert_exec = MagicMock()
+    mock_insert_exec.execute.return_value = MagicMock(data=[row_data])
+    mock_insert_select = MagicMock()
+    mock_insert_select.select.return_value = mock_insert_exec
+    mock_table.return_value.insert.return_value = mock_insert_select
 
     row = insert_message_feedback(
         "tok",
@@ -70,6 +69,7 @@ def test_insert_message_feedback(mock_table, _owned, _enabled):
     assert row["id"] == fid
     assert row["feedback"] == -1
     insert_row = mock_table.return_value.insert.call_args[0][0]
+    mock_table.return_value.insert.return_value.select.assert_called_once()
     assert insert_row["message_id"] == mid
     assert insert_row["metadata"]["latency_ms"] == 1820
 

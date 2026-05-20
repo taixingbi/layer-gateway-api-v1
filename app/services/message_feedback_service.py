@@ -142,7 +142,12 @@ def insert_message_feedback(
         insert["labeler_notes"] = labeler_notes.strip()
 
     try:
-        result = _table(access_token, "message_feedback").insert(insert).execute()
+        result = (
+            _table(access_token, "message_feedback")
+            .insert(insert)
+            .select("id,message_id,conversation_id,user_id,feedback,feedback_type,preference_score,reviewer_type,model,route,prompt_version,feedback_comment,labeler_notes,metadata,created_at")
+            .execute()
+        )
     except Exception as exc:
         _handle_db_error(exc)
     if not result.data:

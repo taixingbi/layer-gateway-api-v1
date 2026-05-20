@@ -200,6 +200,7 @@ def _prepare_chat_history(request: Request, payload: ChatRequest) -> None:
             first_message=payload.message,
         )
         request.state.conversation_id = conv_id
+        payload.conversation_id = conv_id
         db_history = load_messages(access_token, user_id, conv_id)
         payload.history = merge_history(db_history, payload.history)
         append_message(
@@ -348,7 +349,11 @@ async def chat(request: Request, payload: ChatRequest):
     )
     _prepare_chat_history(request, payload)
     orchestrator_payload = _build_orchestrator_request(payload, request)
-    request.state.conversation_id = orchestrator_payload.context.conversation_id
+    persisted_cid = getattr(request.state, "conversation_id", None)
+    if persisted_cid:
+        orchestrator_payload.context.conversation_id = persisted_cid
+    elif orchestrator_payload.context.conversation_id:
+        request.state.conversation_id = orchestrator_payload.context.conversation_id
 
     # Streaming: `Accept: text/event-stream` or JSON `"stream": true` (query flags are not supported).
     accept = (request.headers.get("accept") or "").lower()
@@ -403,16 +408,24 @@ async def chat(request: Request, payload: ChatRequest):
         raise HTTPException(status_code=500, detail="gateway failed") from exc
 
 
+def _format_done_sse_chunk(done_body: dict[str, Any]) -> str:
+    """Format one gateway ``done`` SSE event."""
+    return f"event: done\ndata: {json.dumps(done_body)}\n\n"
+
+
 async def _stream_response(request: Request, orchestrator_payload: OrchestratorChatRequest):
     """Yield gateway SSE events in the stable frontend stream contract."""
     # Emit correlation metadata first so frontend can tag the stream context.
+    stream_cid = (
+        getattr(request.state, "conversation_id", None) or orchestrator_payload.context.conversation_id
+    )
     meta = {
         "request_id": request.state.request_id,
         "trace_id": request.state.trace_id,
         "session_id": orchestrator_payload.context.session_id,
     }
-    if orchestrator_payload.context.conversation_id:
-        meta["conversation_id"] = orchestrator_payload.context.conversation_id
+    if stream_cid:
+        meta["conversation_id"] = stream_cid
     yield f"event: meta\ndata: {json.dumps(meta)}\n\n"
     stream_assistant_message_id: str | None = None
     client = request.app.state.orchestrator_client
@@ -425,6 +438,7 @@ async def _stream_response(request: Request, orchestrator_payload: OrchestratorC
     stream_rewrite: str | None = None
     stream_citations: list[dict[str, Any]] = []
     stream_follow_ups: list[str] = []
+    pending_done_body: dict[str, Any] | None = None
     try:
         # Forward normalized token events from orchestrator stream.
         async for token_event in client.stream_chat(orchestrator_payload, ctx):
@@ -433,18 +447,16 @@ async def _stream_response(request: Request, orchestrator_payload: OrchestratorC
                 upstream_first = False
             if token_event.lstrip().startswith("event: done"):
                 upstream_done_sent = True
-                done_payload = _gateway_sse_chunk_done_payload(token_event)
-                if done_payload:
-                    rewrite_val = done_payload.get("rewrite")
-                    if isinstance(rewrite_val, str) and rewrite_val.strip():
-                        stream_rewrite = rewrite_val.strip()
-                    cites = done_payload.get("citations")
-                    if isinstance(cites, list):
-                        stream_citations = [c for c in cites if isinstance(c, dict)]
-                    follow = done_payload.get("follow_up_questions")
-                    if isinstance(follow, list):
-                        stream_follow_ups = [str(q) for q in follow if q]
-                yield token_event
+                pending_done_body = _gateway_sse_chunk_done_payload(token_event) or {"status": "success"}
+                rewrite_val = pending_done_body.get("rewrite")
+                if isinstance(rewrite_val, str) and rewrite_val.strip():
+                    stream_rewrite = rewrite_val.strip()
+                cites = pending_done_body.get("citations")
+                if isinstance(cites, list):
+                    stream_citations = [c for c in cites if isinstance(c, dict)]
+                follow = pending_done_body.get("follow_up_questions")
+                if isinstance(follow, list):
+                    stream_follow_ups = [str(q) for q in follow if q]
                 continue
             token_text = _gateway_sse_chunk_token_text(token_event)
             if token_text and _upstream_token_text_is_internal_context_error(token_text):
@@ -468,8 +480,6 @@ async def _stream_response(request: Request, orchestrator_payload: OrchestratorC
         if stream_failed:
             yield 'event: done\ndata: {"status":"error"}\n\n'
         else:
-            if not upstream_done_sent:
-                yield "event: done\ndata: {\"status\":\"success\"}\n\n"
             stream_assistant_message_id = _persist_assistant_message(
                 request,
                 "".join(assistant_parts),
@@ -477,12 +487,16 @@ async def _stream_response(request: Request, orchestrator_payload: OrchestratorC
                 citations=stream_citations,
                 follow_up_questions=stream_follow_ups,
             )
+            done_body = pending_done_body if upstream_done_sent else {"status": "success"}
             if stream_assistant_message_id:
-                yield (
-                    "event: meta\ndata: "
-                    + json.dumps({"assistant_message_id": stream_assistant_message_id})
-                    + "\n\n"
-                )
+                done_body["assistant_message_id"] = stream_assistant_message_id
+            if stream_rewrite and not done_body.get("rewrite"):
+                done_body["rewrite"] = stream_rewrite
+            if stream_citations and not done_body.get("citations"):
+                done_body["citations"] = stream_citations
+            if stream_follow_ups and not done_body.get("follow_up_questions"):
+                done_body["follow_up_questions"] = stream_follow_ups
+            yield _format_done_sse_chunk(done_body)
     except HTTPException as exc:
         # Convert mapped HTTP failures to stream-safe error envelope.
         payload = {"status": "error", "error": {"code": str(exc.status_code), "message": exc.detail}}
