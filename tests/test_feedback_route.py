@@ -61,6 +61,44 @@ def test_feedback_persists_and_proxies_flat_headers(mock_insert, _enabled, monke
     get_settings.cache_clear()
 
 
+@patch("app.routes.feedback.feedback_persistence_enabled", return_value=True)
+@patch("app.routes.feedback.insert_message_feedback")
+def test_feedback_legacy_trace_only_returns_204(mock_insert, _enabled, monkeypatch):
+    """Legacy ``trace_id`` + ``rating`` without message ids proxies and returns 204."""
+    monkeypatch.setenv("ORCHESTRATOR_CONTRACT", "flat_headers")
+    get_settings.cache_clear()
+
+    app = create_app()
+    app.state.orchestrator_client = StubWithFeedback()
+    client = TestClient(app)
+    response = client.post(
+        "/api/feedback",
+        headers=_auth_headers(),
+        json={"trace_id": "req-123", "rating": "thumbs_up"},
+    )
+    assert response.status_code == 204
+    mock_insert.assert_not_called()
+    get_settings.cache_clear()
+
+
+@patch("app.routes.feedback.feedback_persistence_enabled", return_value=True)
+def test_feedback_missing_ids_returns_400_not_422(_enabled, monkeypatch):
+    """Supabase persistence without message scope returns 400 with a clear message."""
+    monkeypatch.setenv("ORCHESTRATOR_CONTRACT", "gateway_json")
+    get_settings.cache_clear()
+
+    app = create_app()
+    client = TestClient(app)
+    response = client.post(
+        "/api/feedback",
+        headers=_auth_headers(),
+        json={"rating": "thumbs_up", "trace_id": "t1"},
+    )
+    assert response.status_code == 400
+    assert "message_id" in response.json()["detail"]
+    get_settings.cache_clear()
+
+
 def test_feedback_requires_auth():
     app = create_app()
     with TestClient(app) as client:

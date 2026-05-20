@@ -83,7 +83,10 @@ def create_app() -> FastAPI:
             request_id=getattr(request.state, "request_id", None),
             trace_id=getattr(request.state, "trace_id", None),
         )
-        return JSONResponse(status_code=422, content={"detail": exc.errors()})
+        return JSONResponse(
+            status_code=422,
+            content={"detail": detail, "errors": exc.errors()},
+        )
 
     @app.exception_handler(HTTPException)
     async def log_http_exception(request: Request, exc: HTTPException) -> JSONResponse:

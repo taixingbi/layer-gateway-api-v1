@@ -40,6 +40,15 @@ def test_empty_trace_id_and_null_metadata():
     assert req.feedback == 1
 
 
+def test_legacy_trace_only_validates():
+    """Orchestrator-only body (no message ids) must not 422."""
+    req = FeedbackRequest.model_validate(
+        {"trace_id": "trace-from-ui", "rating": "thumbs_up"},
+    )
+    assert req.message_id is None
+    assert req.trace_id == "trace-from-ui"
+
+
 def test_db_prefix_stripped_from_message_id():
     mid = str(uuid.uuid4())
     cid = str(uuid.uuid4())

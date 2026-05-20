@@ -27,8 +27,8 @@ class FeedbackRequest(BaseModel):
 
     model_config = ConfigDict(extra="ignore")
 
-    message_id: str = Field(min_length=3, max_length=128)
-    conversation_id: str = Field(min_length=3, max_length=128)
+    message_id: str | None = Field(default=None, max_length=128)
+    conversation_id: str | None = Field(default=None, max_length=128)
     reviewer_type: str = Field(default="end_user", min_length=1, max_length=64)
     feedback_type: str | None = Field(default=None, max_length=128)
     feedback: int | None = Field(default=None, ge=-1, le=1)
@@ -54,9 +54,17 @@ class FeedbackRequest(BaseModel):
         if not isinstance(data, dict):
             return data
         d = dict(data)
+        if not d.get("message_id") and d.get("messageId"):
+            d["message_id"] = d.pop("messageId")
+        if not d.get("conversation_id") and d.get("conversationId"):
+            d["conversation_id"] = d.pop("conversationId")
         run_id = d.pop("run_id", None)
         if run_id and not d.get("trace_id"):
             d["trace_id"] = run_id
+        raw_feedback = d.get("feedback")
+        if isinstance(raw_feedback, str) and raw_feedback in ("thumbs_up", "thumbs_down"):
+            d.setdefault("rating", raw_feedback)
+            d.pop("feedback", None)
         for key in ("trace_id", "request_id"):
             if key in d:
                 d[key] = _empty_str_to_none(d[key])
@@ -71,8 +79,11 @@ class FeedbackRequest(BaseModel):
     @field_validator("message_id", "conversation_id", mode="before")
     @classmethod
     def _normalize_ids(cls, value: Any) -> Any:
+        if value is None:
+            return None
         if isinstance(value, str):
-            return _strip_db_uuid_prefix(value)
+            stripped = _strip_db_uuid_prefix(value)
+            return stripped if stripped else None
         return value
 
     @field_validator("trace_id", "request_id", mode="before")

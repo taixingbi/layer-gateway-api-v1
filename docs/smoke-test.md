@@ -107,7 +107,22 @@ Expect `401`.
 
 If the gateway is in `gateway_json` mode, `POST /api/feedback` returns **501**.
 
-**Thumbs up**
+**Thumbs up** (Supabase persistence — use ids from a prior `/api/chat` response)
+
+```bash
+curl -sS -X POST "http://192.168.86.179:30185/api/feedback" \
+  -H "Authorization: Bearer <access_token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "message_id": "<assistant_message_uuid>",
+    "conversation_id": "<conversation_uuid>",
+    "rating": "thumbs_up",
+    "trace_id": "smoke-trace-001",
+    "request_id": "smoke-req-001"
+  }' | jq .
+```
+
+**Legacy orchestrator-only** (no Supabase row; `ORCHESTRATOR_CONTRACT=flat_headers` only)
 
 ```bash
 curl -sS -X POST "http://192.168.86.179:30185/api/feedback" \

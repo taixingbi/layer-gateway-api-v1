@@ -44,13 +44,16 @@ async def post_feedback(request: Request, payload: FeedbackRequest):
     access_token = parse_bearer(request.headers.get("authorization"))
 
     row: dict[str, Any] | None = None
-    if feedback_persistence_enabled():
+    has_message_scope = bool(payload.message_id and payload.conversation_id)
+    if feedback_persistence_enabled() and has_message_scope:
+        message_id = payload.message_id
+        conversation_id = payload.conversation_id
         try:
             row = insert_message_feedback(
                 access_token,
                 user_id,
-                message_id=payload.message_id,
-                conversation_id=payload.conversation_id,
+                message_id=message_id,
+                conversation_id=conversation_id,
                 reviewer_type=payload.reviewer_type,
                 feedback_type=payload.feedback_type,
                 feedback=payload.feedback,
@@ -100,9 +103,26 @@ async def post_feedback(request: Request, payload: FeedbackRequest):
 
     if not row:
         if settings.orchestrator_contract != "flat_headers":
+            if feedback_persistence_enabled() and not has_message_scope:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        "message_id and conversation_id are required to save feedback. "
+                        "Wait until the assistant reply is saved, then try again."
+                    ),
+                )
             raise HTTPException(
                 status_code=503,
                 detail="Feedback persistence requires Supabase configuration",
+            )
+        proxy_body = _orchestrator_proxy_body(payload)
+        if not proxy_body.get("trace_id"):
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Provide message_id and conversation_id to save feedback, "
+                    "or trace_id (run_id) for legacy orchestrator-only feedback."
+                ),
             )
         return Response(status_code=204)
 
