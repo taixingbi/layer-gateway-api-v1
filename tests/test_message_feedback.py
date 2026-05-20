@@ -113,11 +113,8 @@ def test_post_feedback_returns_created_row(mock_insert, _enabled):
 
 
 @patch("app.routes.feedback.feedback_persistence_enabled", return_value=False)
-def test_post_feedback_requires_supabase_when_not_proxy_only(_enabled, monkeypatch):
-    """Without Supabase persistence, return 503 (gateway_json has no orchestrator proxy)."""
-    monkeypatch.setenv("ORCHESTRATOR_CONTRACT", "gateway_json")
-    get_settings.cache_clear()
-
+def test_post_feedback_requires_supabase(_enabled):
+    """Without Supabase persistence configured, return 503."""
     app = create_app()
     client = TestClient(app)
     response = client.post(
@@ -131,7 +128,6 @@ def test_post_feedback_requires_supabase_when_not_proxy_only(_enabled, monkeypat
         },
     )
     assert response.status_code == 503
-    get_settings.cache_clear()
 
 
 @patch("app.services.message_feedback_service.persistence_enabled", return_value=True)

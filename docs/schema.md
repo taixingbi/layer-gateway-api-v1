@@ -193,7 +193,7 @@ Stream failure envelope.
 
 ## `POST /api/feedback`
 
-Persists to Supabase **`message_feedback`** when configured. Optionally proxies to orchestrator when `ORCHESTRATOR_CONTRACT=flat_headers` and `trace_id` is set.
+Persists to Supabase **`message_feedback`** when configured. Does **not** forward to the orchestrator.
 
 ### Request headers
 
@@ -224,6 +224,8 @@ Persists to Supabase **`message_feedback`** when configured. Optionally proxies 
 | `question` | string | No | Stored in `metadata.question` when set |
 
 Unknown keys (e.g. UI `reason`) are ignored. `message_id` / `conversation_id` may use a `db-` prefix from the chat UI.
+
+`message_feedback.feedback_type` may store UI values like `thumbs_up` or annotation labels like `not_factual`. `trace_id` / `request_id` are stored in `metadata` when provided.
 
 Example:
 

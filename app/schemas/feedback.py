@@ -1,4 +1,4 @@
-"""Feedback submission for message_feedback persistence and optional orchestrator proxy."""
+"""Feedback submission for Supabase ``message_feedback`` persistence."""
 
 from typing import Any, Literal
 
@@ -23,7 +23,7 @@ def _empty_str_to_none(value: str | None) -> str | None:
 
 
 class FeedbackRequest(BaseModel):
-    """Message-level feedback (Supabase) with optional legacy orchestrator fields."""
+    """Message-level feedback for Supabase; legacy fields (trace_id, rating) map into columns/metadata."""
 
     model_config = ConfigDict(extra="ignore")
 
@@ -40,7 +40,7 @@ class FeedbackRequest(BaseModel):
     labeler_notes: str | None = Field(default=None, max_length=4000)
     metadata: dict[str, Any] | None = None
 
-    # Legacy orchestrator proxy (optional when persisting to Supabase)
+    # Legacy / correlation (stored in metadata when set)
     trace_id: str | None = Field(default=None, max_length=128)
     request_id: str | None = Field(default=None, max_length=128)
     rating: Literal["thumbs_up", "thumbs_down"] | None = None

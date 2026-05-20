@@ -103,11 +103,11 @@ curl -sS -o /dev/stderr -w "%{http_code}\n" -X POST "http://192.168.86.179:30185
 
 Expect `401`.
 
-## Feedback (only when `ORCHESTRATOR_CONTRACT=flat_headers`)
+## Feedback (Supabase `message_feedback` only; not forwarded to orchestrator)
 
-If the gateway is in `gateway_json` mode, `POST /api/feedback` returns **501**.
+Requires **`SUPABASE_URL`** + **`SUPABASE_ANON_KEY`**. Use ids from a prior `/api/chat` response.
 
-**Thumbs up** (Supabase persistence — use ids from a prior `/api/chat` response)
+**Thumbs up**
 
 ```bash
 curl -sS -X POST "http://192.168.86.179:30185/api/feedback" \
@@ -122,35 +122,22 @@ curl -sS -X POST "http://192.168.86.179:30185/api/feedback" \
   }' | jq .
 ```
 
-**Legacy orchestrator-only** (no Supabase row; `ORCHESTRATOR_CONTRACT=flat_headers` only)
+**Thumbs down** (optional fields; `feedback_type` stored in Supabase, e.g. `not_factual`)
 
 ```bash
 curl -sS -X POST "http://192.168.86.179:30185/api/feedback" \
   -H "Authorization: Bearer <access_token>" \
   -H "Content-Type: application/json" \
   -d '{
-    "trace_id": "smoke-trace-001",
-    "request_id": "smoke-req-001",
-    "rating": "thumbs_up"
-  }' | jq .
-```
-
-**Thumbs down** (optional fields)
-
-```bash
-curl -sS -X POST "http://192.168.86.179:30185/api/feedback" \
-  -H "Authorization: Bearer <access_token>" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "trace_id": "smoke-trace-001",
+    "message_id": "<assistant_message_uuid>",
+    "conversation_id": "<conversation_uuid>",
     "rating": "thumbs_down",
     "feedback_type": "not_factual",
     "comment": "Smoke test comment",
-    "question": "Original question text"
+    "question": "Original question text",
+    "trace_id": "smoke-trace-001"
   }' | jq .
 ```
-
-Use the same `trace_id` / `request_id` you sent on the related `/api/chat` call so downstream can correlate.
 
 ## Minimal checklist
 
@@ -161,4 +148,4 @@ Use the same `trace_id` / `request_id` you sent on the related `/api/chat` call 
 | 3 | `GET /metrics` | `200`, body contains `gateway_requests_total` |
 | 4 | `POST /api/chat` (JSON) | `200`, success payload |
 | 5 | `POST /api/chat` with `"stream": true` in body | SSE `meta` → optional `rewrite` → `token` (…) → `done` |
-| 6 | `POST /api/feedback` | `200`/`204`/`4xx` from upstream when `flat_headers`; else `501` |
+| 6 | `POST /api/feedback` | `200` with `FeedbackResponse` when Supabase configured; else `503` |
