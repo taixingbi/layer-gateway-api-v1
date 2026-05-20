@@ -487,6 +487,13 @@ async def _stream_response(request: Request, orchestrator_payload: OrchestratorC
                 citations=stream_citations,
                 follow_up_questions=stream_follow_ups,
             )
+            if stream_assistant_message_id or stream_cid:
+                late_meta: dict[str, Any] = {}
+                if stream_cid:
+                    late_meta["conversation_id"] = stream_cid
+                if stream_assistant_message_id:
+                    late_meta["assistant_message_id"] = stream_assistant_message_id
+                yield f"event: meta\ndata: {json.dumps(late_meta)}\n\n"
             done_body = pending_done_body if upstream_done_sent else {"status": "success"}
             if stream_assistant_message_id:
                 done_body["assistant_message_id"] = stream_assistant_message_id

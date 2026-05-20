@@ -50,13 +50,23 @@ async def post_feedback(request: Request, payload: FeedbackRequest):
             missing.append("message_id")
         if not conversation_id:
             missing.append("conversation_id")
+        legacy_only = bool(payload.trace_id or payload.rating) and not message_id and not conversation_id
+        log_event(
+            "feedback_rejected",
+            missing=",".join(missing),
+            legacy_trace_only=legacy_only,
+            has_trace_id=bool(payload.trace_id),
+            has_rating=bool(payload.rating),
+        )
+        hint = (
+            "Redeploy layer-web-v1 (feedback BFF must send message_id + conversation_id) "
+            "and hard-refresh the browser."
+            if legacy_only
+            else "Wait until the assistant reply finishes saving, then try again."
+        )
         raise HTTPException(
             status_code=400,
-            detail=(
-                f"{', '.join(missing)} required to save feedback. "
-                "Wait until the assistant reply is saved (needs assistant_message_id), "
-                "and ensure the chat thread has a conversation_id."
-            ),
+            detail=f"{', '.join(missing)} required to save feedback. {hint}",
         )
 
     try:
