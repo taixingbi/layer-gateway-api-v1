@@ -99,24 +99,24 @@ class FeedbackRequest(BaseModel):
 
     @model_validator(mode="after")
     def _normalize_legacy_fields(self) -> "FeedbackRequest":
-        """Map thumbs UI fields into feedback columns when not set explicitly."""
+        """Map thumbs UI fields into feedback scores; keep rating out of ``feedback_type`` (DB check)."""
         updates: dict[str, Any] = {}
         if self.feedback is None and self.rating is not None:
             updates["feedback"] = 1 if self.rating == "thumbs_up" else -1
-        if not self.feedback_type and self.rating:
-            updates["feedback_type"] = self.rating
         if self.preference_score is None and self.rating:
             updates["preference_score"] = 5 if self.rating == "thumbs_up" else 1
         if not self.feedback_comment and self.comment:
             updates["feedback_comment"] = self.comment
         meta = dict(self.metadata)
+        if self.rating and "rating" not in meta:
+            meta["rating"] = self.rating
         if self.question and "question" not in meta:
             meta["question"] = self.question
         if self.trace_id and "trace_id" not in meta:
             meta["trace_id"] = self.trace_id
         if self.request_id and "request_id" not in meta:
             meta["request_id"] = self.request_id
-        if meta != self.metadata:
+        if updates or meta != self.metadata:
             updates["metadata"] = meta
         if updates:
             return self.model_copy(update=updates)

@@ -9,11 +9,27 @@ from fastapi.testclient import TestClient
 
 from app.core.config import get_settings
 from app.main import create_app
-from app.services.message_feedback_service import insert_message_feedback
+from app.services.message_feedback_service import (
+    _prepare_feedback_type_for_db,
+    insert_message_feedback,
+)
 
 
 def _auth_headers():
     return {"Authorization": "Bearer token-123"}
+
+
+def test_prepare_feedback_type_maps_thumbs_up_to_metadata():
+    """``thumbs_up`` is not a DB ``feedback_type``; store as metadata.rating."""
+    ft, meta = _prepare_feedback_type_for_db("thumbs_up", {})
+    assert ft is None
+    assert meta["rating"] == "thumbs_up"
+
+
+def test_prepare_feedback_type_keeps_not_factual():
+    ft, meta = _prepare_feedback_type_for_db("not_factual", {"question": "q"})
+    assert ft == "not_factual"
+    assert meta["question"] == "q"
 
 
 @patch("app.services.message_feedback_service.persistence_enabled", return_value=True)
@@ -108,7 +124,8 @@ def test_post_feedback_returns_created_row(mock_insert, _enabled):
     assert body["status"] == "created"
     call_kwargs = mock_insert.call_args.kwargs
     assert call_kwargs["feedback"] == 1
-    assert call_kwargs["feedback_type"] == "thumbs_up"
+    assert call_kwargs["feedback_type"] is None
+    assert call_kwargs["metadata"]["rating"] == "thumbs_up"
     assert call_kwargs["preference_score"] == 5
 
 

@@ -36,7 +36,7 @@ def test_empty_trace_id_and_null_metadata():
         }
     )
     assert req.trace_id is None
-    assert req.metadata == {}
+    assert req.metadata == {"rating": "thumbs_up"}
     assert req.feedback == 1
 
 

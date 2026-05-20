@@ -225,7 +225,7 @@ Persists to Supabase **`message_feedback`** when configured. Does **not** forwar
 
 Unknown keys (e.g. UI `reason`) are ignored. `message_id` / `conversation_id` may use a `db-` prefix from the chat UI.
 
-`message_feedback.feedback_type` may store UI values like `thumbs_up` or annotation labels like `not_factual`. `trace_id` / `request_id` are stored in `metadata` when provided.
+`message_feedback.feedback_type` must be one of: `biased`, `incomplete_instructions`, `not_factual`, `not_relevant`, `other`, `style_tone`, `unsafe` (Postgres check constraint). Thumbs up/down use `feedback` + `preference_score`; UI `rating` is stored in `metadata.rating`. `trace_id` / `request_id` are stored in `metadata` when provided.
 
 Example:
 

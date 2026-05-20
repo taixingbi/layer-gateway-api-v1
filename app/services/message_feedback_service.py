@@ -26,6 +26,38 @@ REVIEWER_END_USER = "end_user"
 RATING_TO_FEEDBACK = {"thumbs_up": 1, "thumbs_down": -1}
 RATING_TO_PREFERENCE_DEFAULT = {"thumbs_up": 5, "thumbs_down": 1}
 
+# Matches Supabase ``message_feedback_feedback_type_check`` (orchestrator enum).
+DB_FEEDBACK_TYPES = frozenset(
+    {
+        "biased",
+        "incomplete_instructions",
+        "not_factual",
+        "not_relevant",
+        "other",
+        "style_tone",
+        "unsafe",
+    }
+)
+UI_THUMBS_FEEDBACK_TYPES = frozenset({"thumbs_up", "thumbs_down"})
+
+
+def _prepare_feedback_type_for_db(
+    feedback_type: str | None,
+    metadata: dict[str, Any] | None,
+) -> tuple[str | None, dict[str, Any]]:
+    """Map UI thumbs labels into metadata; only persist DB-allowed ``feedback_type`` values."""
+    meta = dict(metadata or {})
+    raw = (feedback_type or "").strip()
+    if not raw:
+        return None, meta
+    if raw in UI_THUMBS_FEEDBACK_TYPES:
+        meta.setdefault("rating", raw)
+        return None, meta
+    if raw in DB_FEEDBACK_TYPES:
+        return raw, meta
+    meta.setdefault("feedback_type_label", raw)
+    return "other", meta
+
 
 def feedback_persistence_enabled() -> bool:
     """True when Supabase client can persist feedback rows."""
@@ -116,18 +148,20 @@ def insert_message_feedback(
     if preference_score is not None and not (1 <= preference_score <= 5):
         raise HTTPException(status_code=400, detail="preference_score must be between 1 and 5")
 
+    db_feedback_type, db_metadata = _prepare_feedback_type_for_db(feedback_type, metadata)
+
     insert: dict[str, Any] = {
         "id": str(uuid.uuid4()),
         "message_id": mid,
         "conversation_id": cid,
         "user_id": user_id,
         "reviewer_type": (reviewer_type or REVIEWER_END_USER).strip() or REVIEWER_END_USER,
-        "metadata": metadata or {},
+        "metadata": db_metadata,
     }
     if feedback is not None:
         insert["feedback"] = feedback
-    if feedback_type:
-        insert["feedback_type"] = feedback_type.strip()
+    if db_feedback_type:
+        insert["feedback_type"] = db_feedback_type
     if preference_score is not None:
         insert["preference_score"] = preference_score
     if model and model.strip():
