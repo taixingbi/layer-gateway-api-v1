@@ -45,7 +45,7 @@ def _prepare_feedback_type_for_db(
     feedback_type: str | None,
     metadata: dict[str, Any] | None,
 ) -> tuple[str | None, dict[str, Any]]:
-    """Map UI thumbs labels into metadata; only persist DB-allowed ``feedback_type`` values."""
+    """Normalize client ``feedback_type``; never persist thumbs or unknown labels on the column."""
     meta = dict(metadata or {})
     raw = (feedback_type or "").strip()
     if not raw:
@@ -54,8 +54,10 @@ def _prepare_feedback_type_for_db(
         meta.setdefault("rating", raw)
         return None, meta
     if raw in DB_FEEDBACK_TYPES:
+        if meta.get("rating") == "thumbs_down":
+            meta.setdefault("reason", raw)
         return raw, meta
-    meta.setdefault("feedback_type_label", raw)
+    meta.setdefault("raw_feedback_type", raw)
     return "other", meta
 
 

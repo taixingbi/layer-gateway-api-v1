@@ -122,7 +122,9 @@ curl -sS -X POST "http://192.168.86.179:30185/api/feedback" \
   }' | jq .
 ```
 
-**Thumbs down** (optional fields; `feedback_type` stored in Supabase, e.g. `not_factual`)
+**Thumbs down** (`feedback_type` = reason enum, e.g. `not_factual`; `metadata.rating` = `thumbs_down`)
+
+After deploy, verify new rows never have `feedback_type` = `thumbs_up`. Clean old rows: `sql/message_feedback_cleanup_thumbs.sql`.
 
 ```bash
 curl -sS -X POST "http://192.168.86.179:30185/api/feedback" \

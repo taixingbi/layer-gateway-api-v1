@@ -20,6 +20,23 @@ def test_accepts_run_id_and_reason_extra_fields():
     )
     assert req.trace_id == "trace-from-ui"
     assert req.feedback == -1
+    assert req.feedback_type is None
+    assert req.metadata["rating"] == "thumbs_down"
+
+
+def test_thumbs_up_strips_client_feedback_type():
+    mid = str(uuid.uuid4())
+    cid = str(uuid.uuid4())
+    req = FeedbackRequest.model_validate(
+        {
+            "message_id": mid,
+            "conversation_id": cid,
+            "rating": "thumbs_up",
+            "feedback_type": "thumbs_up",
+        }
+    )
+    assert req.feedback_type is None
+    assert req.metadata["rating"] == "thumbs_up"
 
 
 def test_empty_trace_id_and_null_metadata():

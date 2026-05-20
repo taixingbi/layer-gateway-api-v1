@@ -32,6 +32,22 @@ def test_prepare_feedback_type_keeps_not_factual():
     assert meta["question"] == "q"
 
 
+def test_prepare_feedback_type_thumbs_down_sets_reason():
+    ft, meta = _prepare_feedback_type_for_db(
+        "not_factual",
+        {"rating": "thumbs_down"},
+    )
+    assert ft == "not_factual"
+    assert meta["reason"] == "not_factual"
+    assert meta["rating"] == "thumbs_down"
+
+
+def test_prepare_feedback_type_unknown_maps_to_other():
+    ft, meta = _prepare_feedback_type_for_db("hallucination", {})
+    assert ft == "other"
+    assert meta["raw_feedback_type"] == "hallucination"
+
+
 @patch("app.services.message_feedback_service.persistence_enabled", return_value=True)
 @patch("app.services.message_feedback_service._assert_conversation_owned")
 @patch("app.services.message_feedback_service._table")
@@ -88,6 +104,8 @@ def test_insert_message_feedback(mock_table, _owned, _enabled):
     mock_table.return_value.insert.return_value.select.assert_called_once()
     assert insert_row["message_id"] == mid
     assert insert_row["metadata"]["latency_ms"] == 1820
+    assert insert_row["feedback_type"] == "other"
+    assert insert_row["metadata"]["raw_feedback_type"] == "hallucination"
 
 
 @patch("app.routes.feedback.feedback_persistence_enabled", return_value=True)

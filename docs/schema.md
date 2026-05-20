@@ -209,7 +209,7 @@ Persists to Supabase **`message_feedback`** when configured. Does **not** forwar
 | `message_id` | string (UUID) | Yes | Assistant/user message id from chat persistence |
 | `conversation_id` | string (UUID) | Yes | Owned conversation |
 | `reviewer_type` | string | No | Default `end_user` (`ai_evaluator`, `qa_team`, `rlhf_annotator`, …) |
-| `feedback_type` | string | No | e.g. `thumbs_up`, `hallucination`, `bad_citation` |
+| `feedback_type` | string | No | Reason/category only (`not_factual`, `unsafe`, …). Never `thumbs_up`/`thumbs_down` (use `rating`) |
 | `feedback` | int | No | `-1`, `0`, or `1` (derived from `rating` when omitted) |
 | `preference_score` | int | No | `1`–`5` (defaults from `rating` when omitted) |
 | `model` | string | No | Model name |
@@ -225,24 +225,45 @@ Persists to Supabase **`message_feedback`** when configured. Does **not** forwar
 
 Unknown keys (e.g. UI `reason`) are ignored. `message_id` / `conversation_id` may use a `db-` prefix from the chat UI.
 
-`message_feedback.feedback_type` must be one of: `biased`, `incomplete_instructions`, `not_factual`, `not_relevant`, `other`, `style_tone`, `unsafe` (Postgres check constraint). Thumbs up/down use `feedback` + `preference_score`; UI `rating` is stored in `metadata.rating`. `trace_id` / `request_id` are stored in `metadata` when provided.
+`message_feedback.feedback_type` must be one of: `biased`, `incomplete_instructions`, `not_factual`, `not_relevant`, `other`, `style_tone`, `unsafe` (Postgres check constraint). **Do not** add `thumbs_up` / `thumbs_down` to the constraint. The gateway normalizes unknown client values to `other` and stores the original in `metadata.raw_feedback_type`.
 
-Example:
+**Thumbs up** (persisted row):
+
+```json
+{
+  "feedback": 1,
+  "feedback_type": null,
+  "preference_score": 5,
+  "reviewer_type": "end_user",
+  "metadata": { "rating": "thumbs_up" }
+}
+```
+
+**Thumbs down with reason**:
+
+```json
+{
+  "feedback": -1,
+  "feedback_type": "not_factual",
+  "preference_score": 1,
+  "reviewer_type": "end_user",
+  "metadata": { "rating": "thumbs_down", "reason": "not_factual" }
+}
+```
+
+Request example (thumbs down):
 
 ```json
 {
   "message_id": "2f7f4f4d-12d7-4d92-a6ef-5e3e9c1c5f91",
   "conversation_id": "da26bbf4-8122-4f82-a9d1-0077f02c9d0c",
-  "reviewer_type": "end_user",
-  "feedback_type": "hallucination",
-  "feedback": -1,
-  "preference_score": 1,
-  "model": "qwen2.5-7b",
-  "route": "rag",
-  "feedback_comment": "Wrong visa answer",
-  "metadata": { "latency_ms": 1820, "retrieval_chunks": 4 }
+  "rating": "thumbs_down",
+  "feedback_type": "not_factual",
+  "comment": "Wrong visa answer"
 }
 ```
+
+Historical rows with `feedback_type = thumbs_up` / `thumbs_down`: run `sql/message_feedback_cleanup_thumbs.sql` in Supabase.
 
 ### Response (`FeedbackResponse`)
 

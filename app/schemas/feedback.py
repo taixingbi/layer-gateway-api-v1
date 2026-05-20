@@ -99,7 +99,7 @@ class FeedbackRequest(BaseModel):
 
     @model_validator(mode="after")
     def _normalize_legacy_fields(self) -> "FeedbackRequest":
-        """Map thumbs UI fields into feedback scores; keep rating out of ``feedback_type`` (DB check)."""
+        """Map thumbs into scores + metadata.rating; never copy rating into feedback_type."""
         updates: dict[str, Any] = {}
         if self.feedback is None and self.rating is not None:
             updates["feedback"] = 1 if self.rating == "thumbs_up" else -1
@@ -116,6 +116,10 @@ class FeedbackRequest(BaseModel):
             meta["trace_id"] = self.trace_id
         if self.request_id and "request_id" not in meta:
             meta["request_id"] = self.request_id
+        # Never trust client feedback_type for thumbs; rating lives in metadata only.
+        ft = (self.feedback_type or "").strip()
+        if self.rating == "thumbs_up" or ft in ("thumbs_up", "thumbs_down"):
+            updates["feedback_type"] = None
         if updates or meta != self.metadata:
             updates["metadata"] = meta
         if updates:
