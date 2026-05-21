@@ -36,7 +36,12 @@ class StubOrchestratorClient:
                 "rewrite": "what is taixing visa status",
                 "citations": [{"source": "personal_profile"}],
                 "follow_up_questions": [],
-                "usage": {"input_tokens": 1, "output_tokens": 2, "model": "qwen2.5-7b"},
+                "usage": {
+                    "prompt_tokens": 1,
+                    "completion_tokens": 2,
+                    "total_tokens": 3,
+                    "model": "qwen2.5-7b",
+                },
                 "latency_ms": {"total": 1200.5, "rag": {"total": 900}},
                 "route": "rag",
             },
@@ -101,6 +106,8 @@ def test_chat_persists_on_success(
     assert body["conversation_id"] == conv_id
     assert body["latency_ms"]["total"] >= 0
     assert body["latency_ms"]["orchestrator"]["workflow"]["total"] == 1200.5
+    assert body["usage"]["prompt_tokens"] == 1
+    assert body["usage"]["input_tokens"] == 1
     assert mock_ensure.called
     assert mock_load.called
     assert mock_append.call_count == 2

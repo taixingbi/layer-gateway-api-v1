@@ -5,13 +5,6 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field
 
 
-class Usage(BaseModel):
-    """Token usage summary from orchestrator."""
-
-    input_tokens: int = 0
-    output_tokens: int = 0
-
-
 class ErrorDetails(BaseModel):
     """Structured error payload for failed chat responses."""
 
@@ -35,6 +28,6 @@ class ChatResponse(BaseModel):
     rewrite: str | None = None
     citations: list[dict[str, Any]] = Field(default_factory=list)
     follow_up_questions: list[str] = Field(default_factory=list)
-    usage: Usage = Field(default_factory=Usage)
+    usage: dict[str, Any] = Field(default_factory=dict)
     latency_ms: dict[str, Any] | None = None
     error: ErrorDetails | None = None

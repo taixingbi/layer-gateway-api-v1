@@ -122,6 +122,43 @@ def orchestrator_timings_ms(source: Any) -> dict[str, Any] | None:
     return orchestrator_latency_ms(source)
 
 
+def normalize_orchestrator_usage(source: Any) -> dict[str, Any]:
+    """Pass through orchestrator ``usage``; add legacy ``input_tokens`` / ``output_tokens`` aliases."""
+    if source is None:
+        return {}
+    if isinstance(source, dict):
+        nested = source.get("usage")
+        if isinstance(nested, dict):
+            raw = nested
+        elif any(
+            k in source
+            for k in (
+                "prompt_tokens",
+                "completion_tokens",
+                "total_tokens",
+                "intent_router",
+                "rag",
+                "input_tokens",
+                "output_tokens",
+            )
+        ):
+            raw = source
+        else:
+            return {}
+    elif hasattr(source, "model_dump"):
+        return normalize_orchestrator_usage(source.model_dump(mode="json"))
+    else:
+        return normalize_orchestrator_usage(getattr(source, "usage", None))
+    if not raw:
+        return {}
+    out = dict(raw)
+    if "prompt_tokens" in out and "input_tokens" not in out:
+        out["input_tokens"] = out["prompt_tokens"]
+    if "completion_tokens" in out and "output_tokens" not in out:
+        out["output_tokens"] = out["completion_tokens"]
+    return out
+
+
 def orchestrator_payload_dict(source: Any) -> dict[str, Any]:
     """Normalize orchestrator result to a dict for persistence helpers."""
     if isinstance(source, dict):

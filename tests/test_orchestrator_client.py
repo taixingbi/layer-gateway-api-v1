@@ -19,6 +19,23 @@ from app.services.orchestrator_call_context import OrchestratorCallContext
 from app.services.orchestrator_client import OrchestratorClient, _gateway_done_payload
 
 
+def test_gateway_done_payload_includes_usage():
+    raw = json.dumps(
+        {
+            "status": "ok",
+            "usage": {
+                "prompt_tokens": 100,
+                "completion_tokens": 50,
+                "total_tokens": 150,
+                "rag": {"prompt_tokens": 80, "completion_tokens": 40, "total_tokens": 120},
+            },
+        }
+    )
+    body = _gateway_done_payload(raw, citations=[], follow_up_questions=[])
+    assert body["usage"]["prompt_tokens"] == 100
+    assert body["usage"]["input_tokens"] == 100
+
+
 def test_gateway_done_payload_includes_latency_ms():
     raw = json.dumps(
         {
@@ -439,6 +456,12 @@ async def test_flat_headers_stream_supplements_timings_when_sse_done_has_citatio
         "citations": [cite],
         "follow_up_questions": ["Q?"],
         "latency_ms": {"total": 3632.46, "rag": {"total": 2367.0}},
+        "usage": {
+            "prompt_tokens": 100,
+            "completion_tokens": 50,
+            "total_tokens": 150,
+            "intent_router": {"prompt_tokens": 40, "completion_tokens": 10, "total_tokens": 50},
+        },
     }
 
     async def handler(request: httpx.Request):
@@ -456,6 +479,8 @@ async def test_flat_headers_stream_supplements_timings_when_sse_done_has_citatio
     done_data = json.loads([ln for ln in done_chunk.splitlines() if ln.startswith("data:")][0][5:].strip())
     assert done_data["citations"] == [cite]
     assert done_data["latency_ms"]["total"] == 3632.46
+    assert done_data["usage"]["prompt_tokens"] == 100
+    assert done_data["usage"]["input_tokens"] == 100
 
 
 @pytest.mark.asyncio
@@ -474,6 +499,7 @@ async def test_flat_headers_stream_supplements_metadata_when_sse_lacks_citations
         "citations": [{"cite_id": 1, "source": "profile"}],
         "follow_up_questions": ["Follow up?"],
         "latency_ms": {"total": 500.0},
+        "usage": {"prompt_tokens": 20, "completion_tokens": 10, "total_tokens": 30},
     }
 
     async def handler(request: httpx.Request):
@@ -493,6 +519,7 @@ async def test_flat_headers_stream_supplements_metadata_when_sse_lacks_citations
     assert done_data["citations"] == [{"cite_id": 1, "source": "profile"}]
     assert done_data["follow_up_questions"] == ["Follow up?"]
     assert done_data["latency_ms"]["total"] == 500.0
+    assert done_data["usage"]["prompt_tokens"] == 20
 
 
 @pytest.mark.asyncio
@@ -510,6 +537,7 @@ async def test_gateway_json_stream_appends_done_with_metadata_from_non_stream():
         "follow_up_questions": ["Next?"],
         "usage": {},
         "latency_ms": {"total": 1200.0},
+        "usage": {"prompt_tokens": 5, "completion_tokens": 3, "total_tokens": 8},
     }
     calls = {"stream": 0, "json": 0}
 
@@ -533,3 +561,4 @@ async def test_gateway_json_stream_appends_done_with_metadata_from_non_stream():
     assert done_data["citations"] == [{"cite_id": 1}]
     assert done_data["follow_up_questions"] == ["Next?"]
     assert done_data["latency_ms"]["total"] == 1200.0
+    assert done_data["usage"]["prompt_tokens"] == 5

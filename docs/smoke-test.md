@@ -70,7 +70,7 @@ curl -sS -X POST "http://192.168.86.179:30185/api/chat" \
   }' | jq .
 ```
 
-Expect `200`, `status: "success"`, echoed `request_id` / `trace_id` / `session_id`, optional `latency_ms` (`total`, `auth`, `validation`, `storage`, `orchestrator`), and no `error` key in the JSON body.
+Expect `200`, `status: "success"`, echoed `request_id` / `trace_id` / `session_id`, optional `latency_ms` (`total`, `auth`, `validation`, `storage`, `orchestrator`), optional nested `usage` from orchestrator, and no `error` key in the JSON body.
 
 **JWKS fallback** (no Supabase): set `ACCESS_TOKEN` to a valid OIDC access token (`iss`, `aud`, `exp` must match `AUTH_JWT_*`). Invalid or expired tokens return **401**.
 
@@ -95,7 +95,7 @@ curl -N -sS -X POST "http://192.168.86.179:30185/api/chat" \
   }'
 ```
 
-Expect lines starting with `event: meta`, then optional `event: rewrite`, then one or more `event: token`, then `event: done` with `latency_ms` when upstream provides timings.
+Expect lines starting with `event: meta`, then optional `event: rewrite`, then one or more `event: token`, then `event: done` with `latency_ms` and `usage` when upstream provides them.
 
 ### HuntAI web (Next BFF) — translated SSE
 
@@ -161,6 +161,6 @@ curl -sS -X POST "http://192.168.86.179:30185/api/feedback" \
 | 1 | `GET /health` | `200`, `"status":"ok"` |
 | 2 | `GET /ready` | `200` if orchestrator healthy, else `503` |
 | 3 | `GET /metrics` | `200`, body contains `gateway_requests_total` |
-| 4 | `POST /api/chat` (JSON) | `200`, success payload with `latency_ms` |
-| 5 | `POST /api/chat` with `"stream": true` in body | SSE `meta` → optional `rewrite` → `token` (…) → `done` with `latency_ms` |
+| 4 | `POST /api/chat` (JSON) | `200`, success payload with `latency_ms` and `usage` |
+| 5 | `POST /api/chat` with `"stream": true` in body | SSE `meta` → optional `rewrite` → `token` (…) → `done` with `latency_ms` and `usage` |
 | 6 | `POST /api/feedback` | `200` with `FeedbackResponse` when Supabase configured; else `503` |

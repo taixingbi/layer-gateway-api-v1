@@ -20,13 +20,14 @@ from app.services.chat_history_service import (
     load_messages,
     merge_history,
     message_persist_status,
+    normalize_orchestrator_usage,
     orchestrator_payload_dict,
     persistence_enabled,
     _model_from_usage,
     resolve_assistant_model_name,
 )
 from app.schemas.history import ChatHistoryMessage
-from app.schemas.chat_response import ChatResponse, ErrorDetails, Usage
+from app.schemas.chat_response import ChatResponse, ErrorDetails
 from app.schemas.orchestrator import (
     AuthContext,
     OrchestratorChatRequest,
@@ -411,7 +412,7 @@ async def chat(request: Request, payload: ChatRequest):
             rewrite=getattr(result, "rewrite", None),
             citations=result.citations,
             follow_up_questions=getattr(result, "follow_up_questions", None) or [],
-            usage=result.usage,
+            usage=normalize_orchestrator_usage(result),
             done_payload=orchestrator_payload_dict(result),
         )
         conv_id = getattr(request.state, "conversation_id", None)
@@ -426,7 +427,7 @@ async def chat(request: Request, payload: ChatRequest):
             rewrite=getattr(result, "rewrite", None),
             citations=result.citations,
             follow_up_questions=getattr(result, "follow_up_questions", None) or [],
-            usage=Usage(**result.usage) if result.usage else Usage(),
+            usage=normalize_orchestrator_usage(result),
             latency_ms=latency.build(request, orchestrator_workflow=orch_workflow),
         )
         return JSONResponse(content=body.model_dump(mode="json", exclude_none=True))
@@ -516,12 +517,10 @@ async def _stream_response(request: Request, orchestrator_payload: OrchestratorC
             yield 'event: done\ndata: {"status":"error"}\n\n'
         else:
             done_for_model = pending_done_body if isinstance(pending_done_body, dict) else None
-            stream_usage = (
-                done_for_model.get("usage")
-                if isinstance(done_for_model, dict) and isinstance(done_for_model.get("usage"), dict)
-                else None
+            stream_usage = normalize_orchestrator_usage(done_for_model)
+            stream_model = resolve_assistant_model_name(
+                usage=stream_usage, done_payload=done_for_model
             )
-            stream_model = resolve_assistant_model_name(done_payload=done_for_model)
             orch_workflow = orchestrator_workflow_from_source(done_for_model)
             done_body = (
                 dict(pending_done_body)
@@ -559,6 +558,9 @@ async def _stream_response(request: Request, orchestrator_payload: OrchestratorC
             attach_latency_to_payload(
                 done_body, request, orchestrator_workflow=orch_workflow
             )
+            stream_usage_out = normalize_orchestrator_usage(done_body) or stream_usage
+            if stream_usage_out:
+                done_body["usage"] = stream_usage_out
             yield _format_done_sse_chunk(done_body)
     except HTTPException as exc:
         # Convert mapped HTTP failures to stream-safe error envelope.

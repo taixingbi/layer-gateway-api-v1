@@ -78,9 +78,7 @@ Example:
 | `rewrite` | string | No | Intent-router rewritten question; omitted when absent |
 | `citations` | array | Yes | Default `[]`; see [Citation object](#citation-object) |
 | `follow_up_questions` | array of string | Yes | Default `[]` |
-| `usage` | object | Yes | Token usage |
-| `usage.input_tokens` | integer | Yes | Default `0` |
-| `usage.output_tokens` | integer | Yes | Default `0` |
+| `usage` | object | Yes | Orchestrator token usage (pass-through); includes `prompt_tokens`, `completion_tokens`, `total_tokens`, nested `intent_router` / `rag`, and legacy aliases `input_tokens` / `output_tokens` |
 | `latency_ms` | object | No | Request latency envelope: `total`, `auth`, `validation`, `storage`, `orchestrator` (also stored on assistant `messages.metadata`) |
 | `error` | object | No | Omitted on success; see [Error object](#error-object) |
 
@@ -106,8 +104,23 @@ Example:
     "Does Taixing need to renew the H4 EAD periodically?"
   ],
   "usage": {
-    "input_tokens": 0,
-    "output_tokens": 0
+    "prompt_tokens": 1145,
+    "completion_tokens": 163,
+    "total_tokens": 1308,
+    "input_tokens": 1145,
+    "output_tokens": 163,
+    "intent_router": {
+      "prompt_tokens": 516,
+      "completion_tokens": 54,
+      "total_tokens": 570
+    },
+    "rag": {
+      "prompt_tokens": 629,
+      "completion_tokens": 109,
+      "total_tokens": 738,
+      "chat": { "prompt_tokens": 356, "completion_tokens": 23, "total_tokens": 379 },
+      "follow_up_chat": { "prompt_tokens": 273, "completion_tokens": 86, "total_tokens": 359 }
+    }
   },
   "latency_ms": {
     "total": 4896,

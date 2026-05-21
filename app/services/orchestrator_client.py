@@ -12,6 +12,7 @@ from app.core.config import Settings
 from app.core.logging import log_event
 from app.core.time_util import eastern_from_timestamp
 from app.schemas.orchestrator import OrchestratorChatRequest, OrchestratorChatResponse
+from app.services.chat_history_service import normalize_orchestrator_usage
 from app.services.chat_latency import orchestrator_workflow_from_source
 from app.services.orchestrator_call_context import OrchestratorCallContext
 
@@ -19,6 +20,11 @@ from app.services.orchestrator_call_context import OrchestratorCallContext
 def _upstream_has_workflow_timings(payload: dict[str, Any]) -> bool:
     """True when payload already carries orchestrator workflow timings."""
     return orchestrator_workflow_from_source(payload) is not None
+
+
+def _upstream_has_usage(payload: dict[str, Any]) -> bool:
+    """True when payload already carries orchestrator usage."""
+    return bool(normalize_orchestrator_usage(payload))
 
 _ORCH_LOG_BODY_MAX_CHARS = 8000
 ORCHESTRATOR_HTTP_LOGGER = "layer_gateway.orchestrator_http"
@@ -589,10 +595,12 @@ class OrchestratorClient:
 
     def _flat_stream_metadata_supplement(
         self, payload: OrchestratorChatRequest, stream_ctx: OrchestratorCallContext
-    ) -> Callable[[], Awaitable[tuple[list[dict[str, Any]], list[str], dict[str, Any] | None]]]:
-        """When upstream SSE omits metadata, fetch citations / follow-ups / timings via non-stream JSON."""
+    ) -> Callable[
+        [], Awaitable[tuple[list[dict[str, Any]], list[str], dict[str, Any] | None, dict[str, Any]]]
+    ]:
+        """When upstream SSE omits metadata, fetch citations / follow-ups / timings / usage via non-stream JSON."""
 
-        async def _fetch() -> tuple[list[dict[str, Any]], list[str], dict[str, Any] | None]:
+        async def _fetch() -> tuple[list[dict[str, Any]], list[str], dict[str, Any] | None, dict[str, Any]]:
             """Run one non-stream chat to fetch stream metadata missing from SSE."""
             non_stream_ctx = OrchestratorCallContext(
                 session_id=stream_ctx.session_id,
@@ -612,7 +620,12 @@ class OrchestratorClient:
                 for q in (result.follow_up_questions or [])
                 if isinstance(q, str) and str(q).strip()
             ]
-            return cites, follow_ups, orchestrator_workflow_from_source(result)
+            return (
+                cites,
+                follow_ups,
+                orchestrator_workflow_from_source(result),
+                normalize_orchestrator_usage(result),
+            )
 
         return _fetch
 
@@ -754,6 +767,9 @@ def _done_body_from_orchestrator_result(result: OrchestratorChatResponse) -> dic
     orch_workflow = orchestrator_workflow_from_source(result)
     if orch_workflow:
         body["latency_ms"] = orch_workflow
+    usage = normalize_orchestrator_usage(result)
+    if usage:
+        body["usage"] = usage
     return body
 
 
@@ -779,10 +795,12 @@ def _format_done_sse_chunk(done_body: dict[str, Any]) -> str:
 
 async def _enrich_stream_done_chunks(
     chunks: list[str],
-    supplement: Callable[[], Awaitable[tuple[list[dict[str, Any]], list[str], dict[str, Any] | None]]]
+    supplement: Callable[
+        [], Awaitable[tuple[list[dict[str, Any]], list[str], dict[str, Any] | None, dict[str, Any]]]
+    ]
     | None,
 ) -> list[str]:
-    """Ensure terminal ``done`` includes citations, follow-ups, and timings (supplement when missing)."""
+    """Ensure terminal ``done`` includes citations, follow-ups, timings, and usage (supplement when missing)."""
     done_idx = -1
     for i, chunk in enumerate(chunks):
         if chunk.lstrip().startswith("event: done"):
@@ -799,16 +817,19 @@ async def _enrich_stream_done_chunks(
         not done_body.get("citations")
         or not done_body.get("follow_up_questions")
         or not _upstream_has_workflow_timings(done_body)
+        or not _upstream_has_usage(done_body)
     )
     if needs_supplement:
         try:
-            s_cites, s_follows, s_timings = await supplement()
+            s_cites, s_follows, s_timings, s_usage = await supplement()
             if s_cites and not done_body.get("citations"):
                 done_body["citations"] = s_cites
             if s_follows and not done_body.get("follow_up_questions"):
                 done_body["follow_up_questions"] = s_follows
             if s_timings and not _upstream_has_workflow_timings(done_body):
                 done_body["latency_ms"] = s_timings
+            if s_usage and not _upstream_has_usage(done_body):
+                done_body["usage"] = s_usage
         except HTTPException:
             raise
         except Exception as exc:
@@ -862,6 +883,9 @@ def _gateway_done_payload(
         body["latency_ms"] = upstream_timings
     elif latency_ms:
         body["latency_ms"] = latency_ms
+    upstream_usage = normalize_orchestrator_usage(parsed)
+    if upstream_usage:
+        body["usage"] = upstream_usage
     return body
 
 
@@ -872,6 +896,7 @@ async def _iter_upstream_sse_as_gateway_tokens(response: httpx.Response) -> Asyn
     follow_ups_acc: list[str] = []
     rewrite_acc: str | None = None
     timings_acc: dict[str, Any] | None = None
+    usage_acc: dict[str, Any] | None = None
     async for line in response.aiter_lines():
         if line.startswith(":"):
             continue
@@ -893,6 +918,9 @@ async def _iter_upstream_sse_as_gateway_tokens(response: httpx.Response) -> Asyn
                 ndjson_timings = orchestrator_workflow_from_source(ndjson)
                 if ndjson_timings:
                     timings_acc = ndjson_timings
+                ndjson_usage = normalize_orchestrator_usage(ndjson)
+                if ndjson_usage:
+                    usage_acc = ndjson_usage
             if ndjson_type == "rewrite":
                 text = ndjson.get("text") if ndjson else None
                 if isinstance(text, str) and text.strip():
@@ -920,6 +948,8 @@ async def _iter_upstream_sse_as_gateway_tokens(response: httpx.Response) -> Asyn
                     rewrite=rewrite_acc,
                     latency_ms=timings_acc,
                 )
+                if usage_acc and not _upstream_has_usage(done_body):
+                    done_body["usage"] = usage_acc
                 yield _format_done_sse_chunk(done_body)
                 continue
 
@@ -931,6 +961,8 @@ async def _iter_upstream_sse_as_gateway_tokens(response: httpx.Response) -> Asyn
                     rewrite=rewrite_acc,
                     latency_ms=timings_acc,
                 )
+                if usage_acc and not _upstream_has_usage(done_body):
+                    done_body["usage"] = usage_acc
                 yield _format_done_sse_chunk(done_body)
                 continue
 
