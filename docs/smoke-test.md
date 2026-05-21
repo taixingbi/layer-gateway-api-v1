@@ -89,7 +89,7 @@ curl -N -sS -X POST "http://192.168.86.179:30185/api/chat" \
   -H "Content-Type: application/json" \
   -H "X-Session-Id: smoke-sess-002" \
   -d '{
-    "message": "Hello from smoke test",
+    "message": "what is Taixing US visa status?",
     "stream": true,
     "metadata": { "user_agent": "curl-smoke" }
   }'

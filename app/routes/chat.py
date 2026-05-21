@@ -261,12 +261,16 @@ def _persist_assistant_message(
         latency_ms = chat_latency_recorder(request).build(
             request, orchestrator_workflow=orch_workflow
         )
+    normalized_usage = normalize_orchestrator_usage(usage) if usage else normalize_orchestrator_usage(
+        done_payload
+    )
     metadata = assistant_message_metadata(
         rewrite=rewrite,
         citations=citations,
         follow_up_questions=follow_up_questions,
-        model=resolve_assistant_model_name(usage=usage, done_payload=done_payload),
+        model=resolve_assistant_model_name(usage=normalized_usage or usage, done_payload=done_payload),
         route=route_from_done if isinstance(route_from_done, str) else None,
+        usage=normalized_usage or None,
         latency_ms=latency_ms,
     )
     try:

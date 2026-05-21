@@ -198,6 +198,7 @@ def assistant_message_metadata(
     follow_up_questions: list[str] | None = None,
     model: str | None = None,
     route: str | None = None,
+    usage: dict[str, Any] | None = None,
     latency_ms: dict[str, Any] | None = None,
     timings_ms: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
@@ -213,6 +214,8 @@ def assistant_message_metadata(
         meta["model"] = model.strip()
     route_label = (route or "").strip() or default_chat_route_label()
     meta["route"] = route_label
+    if usage:
+        meta["usage"] = usage
     stored_latency = latency_ms or timings_ms
     if stored_latency:
         meta["latency_ms"] = stored_latency

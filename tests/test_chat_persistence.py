@@ -124,6 +124,7 @@ def test_chat_persists_on_success(
     assert meta["route"] == "rag"
     assert meta["latency_ms"]["orchestrator"]["workflow"]["total"] == 1200.5
     assert "storage" in meta["latency_ms"]
+    assert meta["usage"]["prompt_tokens"] == 1
 
 
 @patch("app.routes.chat.persistence_enabled", return_value=True)

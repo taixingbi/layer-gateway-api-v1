@@ -431,7 +431,7 @@ Upstream non-stream JSON (`OrchestratorChatResponse`): `answer`, `citations`, `f
 | `messages[].role` | string | `user` or `assistant` |
 | `messages[].content` | string | Message text |
 | `messages[].status` | string | Optional; assistant rows use `complete` |
-| `messages[].metadata` | object | Optional jsonb; assistant may include `rewrite`, `citations`, `follow_up_questions`, `model`, `route`, `latency_ms` |
+| `messages[].metadata` | object | Optional jsonb; assistant may include `rewrite`, `citations`, `follow_up_questions`, `model`, `route`, `usage`, `latency_ms` |
 | `messages[].created_at` | string | Optional ISO 8601 (EST) |
 
 | Status | When |

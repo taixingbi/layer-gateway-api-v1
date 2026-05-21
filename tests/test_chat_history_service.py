@@ -65,6 +65,18 @@ def test_assistant_message_metadata_includes_latency_ms():
     assert meta["latency_ms"] == latency
 
 
+def test_assistant_message_metadata_includes_usage():
+    usage = {
+        "prompt_tokens": 100,
+        "completion_tokens": 50,
+        "total_tokens": 150,
+        "intent_router": {"total_tokens": 40},
+    }
+    meta = assistant_message_metadata(usage=usage)
+    assert meta is not None
+    assert meta["usage"]["prompt_tokens"] == 100
+
+
 @patch("app.core.config.get_settings")
 def test_resolve_assistant_model_name_prefers_env_when_no_upstream(mock_settings):
     mock_settings.return_value.chat_assistant_model = "qwen2.5-7b"
