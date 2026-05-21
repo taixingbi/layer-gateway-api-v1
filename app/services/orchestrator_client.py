@@ -12,6 +12,7 @@ from app.core.config import Settings
 from app.core.logging import log_event
 from app.core.time_util import eastern_from_timestamp
 from app.schemas.orchestrator import OrchestratorChatRequest, OrchestratorChatResponse
+from app.services.chat_latency import orchestrator_latency_ms
 from app.services.orchestrator_call_context import OrchestratorCallContext
 
 _ORCH_LOG_BODY_MAX_CHARS = 8000
@@ -450,6 +451,7 @@ class OrchestratorClient:
                     note="stream_opened",
                 )
                 rewrite_acc: str | None = None
+                timings_acc: dict[str, Any] | None = None
                 async for line in response.aiter_lines():
                     if not line:
                         continue
@@ -461,6 +463,9 @@ class OrchestratorClient:
                         continue
                     if not isinstance(parsed, dict):
                         continue
+                    ndjson_timings = orchestrator_latency_ms(parsed)
+                    if ndjson_timings:
+                        timings_acc = ndjson_timings
                     event_type = parsed.get("type")
                     if isinstance(event_type, str):
                         kind = event_type.lower()
@@ -479,6 +484,8 @@ class OrchestratorClient:
             done_body = _done_body_from_orchestrator_result(result)
             if rewrite_acc and not done_body.get("rewrite"):
                 done_body["rewrite"] = rewrite_acc
+            if timings_acc and not orchestrator_latency_ms(done_body):
+                done_body["latency_ms"] = timings_acc
             _log_orchestrator_response(
                 settings=self._settings,
                 method="POST",
@@ -577,11 +584,11 @@ class OrchestratorClient:
 
     def _flat_stream_metadata_supplement(
         self, payload: OrchestratorChatRequest, stream_ctx: OrchestratorCallContext
-    ) -> Callable[[], Awaitable[tuple[list[dict[str, Any]], list[str]]]]:
-        """When upstream SSE omits ``citations`` / ``follow_up_questions``, fetch them via non-stream JSON."""
+    ) -> Callable[[], Awaitable[tuple[list[dict[str, Any]], list[str], dict[str, Any] | None]]]:
+        """When upstream SSE omits metadata, fetch citations / follow-ups / timings via non-stream JSON."""
 
-        async def _fetch() -> tuple[list[dict[str, Any]], list[str]]:
-            """Run one non-stream chat to fetch citations and follow-ups."""
+        async def _fetch() -> tuple[list[dict[str, Any]], list[str], dict[str, Any] | None]:
+            """Run one non-stream chat to fetch stream metadata missing from SSE."""
             non_stream_ctx = OrchestratorCallContext(
                 session_id=stream_ctx.session_id,
                 request_id=stream_ctx.request_id,
@@ -600,7 +607,7 @@ class OrchestratorClient:
                 for q in (result.follow_up_questions or [])
                 if isinstance(q, str) and str(q).strip()
             ]
-            return cites, follow_ups
+            return cites, follow_ups, orchestrator_latency_ms(result)
 
         return _fetch
 
@@ -739,8 +746,9 @@ def _done_body_from_orchestrator_result(result: OrchestratorChatResponse) -> dic
         body["citations"] = result.citations
     if result.follow_up_questions:
         body["follow_up_questions"] = result.follow_up_questions
-    if result.timings_ms:
-        body["timings_ms"] = result.timings_ms
+    orch_latency = orchestrator_latency_ms(result)
+    if orch_latency:
+        body["latency_ms"] = orch_latency
     return body
 
 
@@ -766,9 +774,10 @@ def _format_done_sse_chunk(done_body: dict[str, Any]) -> str:
 
 async def _enrich_stream_done_chunks(
     chunks: list[str],
-    supplement: Callable[[], Awaitable[tuple[list[dict[str, Any]], list[str]]]] | None,
+    supplement: Callable[[], Awaitable[tuple[list[dict[str, Any]], list[str], dict[str, Any] | None]]]
+    | None,
 ) -> list[str]:
-    """Ensure terminal ``done`` includes citations / follow-ups (post-stream supplement when missing)."""
+    """Ensure terminal ``done`` includes citations, follow-ups, and timings (supplement when missing)."""
     done_idx = -1
     for i, chunk in enumerate(chunks):
         if chunk.lstrip().startswith("event: done"):
@@ -781,13 +790,20 @@ async def _enrich_stream_done_chunks(
     elif supplement is None:
         return chunks
 
-    if not done_body.get("citations") and not done_body.get("follow_up_questions") and supplement is not None:
+    needs_supplement = supplement is not None and (
+        not done_body.get("citations")
+        or not done_body.get("follow_up_questions")
+        or not orchestrator_latency_ms(done_body)
+    )
+    if needs_supplement:
         try:
-            s_cites, s_follows = await supplement()
-            if s_cites:
+            s_cites, s_follows, s_timings = await supplement()
+            if s_cites and not done_body.get("citations"):
                 done_body["citations"] = s_cites
-            if s_follows:
+            if s_follows and not done_body.get("follow_up_questions"):
                 done_body["follow_up_questions"] = s_follows
+            if s_timings and not orchestrator_latency_ms(done_body):
+                done_body["latency_ms"] = s_timings
         except HTTPException:
             raise
         except Exception as exc:
@@ -807,6 +823,7 @@ def _gateway_done_payload(
     citations: list[dict[str, Any]],
     follow_up_questions: list[str],
     rewrite: str | None = None,
+    latency_ms: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build gateway ``done`` data, merging upstream terminal event with accumulated RAG fields."""
     body: dict[str, Any] = {"status": "success"}
@@ -835,9 +852,11 @@ def _gateway_done_payload(
     upstream_follow = parsed.get("follow_up_questions")
     if isinstance(upstream_follow, list) and upstream_follow:
         body["follow_up_questions"] = [str(q) for q in upstream_follow if q]
-    upstream_timings = parsed.get("timings_ms")
-    if isinstance(upstream_timings, dict) and upstream_timings:
-        body["timings_ms"] = upstream_timings
+    upstream_timings = orchestrator_latency_ms(parsed)
+    if upstream_timings:
+        body["latency_ms"] = upstream_timings
+    elif latency_ms:
+        body["latency_ms"] = latency_ms
     return body
 
 
@@ -847,6 +866,7 @@ async def _iter_upstream_sse_as_gateway_tokens(response: httpx.Response) -> Asyn
     citations_acc: list[dict[str, Any]] = []
     follow_ups_acc: list[str] = []
     rewrite_acc: str | None = None
+    timings_acc: dict[str, Any] | None = None
     async for line in response.aiter_lines():
         if line.startswith(":"):
             continue
@@ -864,6 +884,10 @@ async def _iter_upstream_sse_as_gateway_tokens(response: httpx.Response) -> Asyn
             raw = "\n".join(data_lines)
 
             ndjson_type, ndjson = _orchestrator_sse_ndjson_type(raw)
+            if ndjson is not None:
+                ndjson_timings = orchestrator_latency_ms(ndjson)
+                if ndjson_timings:
+                    timings_acc = ndjson_timings
             if ndjson_type == "rewrite":
                 text = ndjson.get("text") if ndjson else None
                 if isinstance(text, str) and text.strip():
@@ -889,6 +913,7 @@ async def _iter_upstream_sse_as_gateway_tokens(response: httpx.Response) -> Asyn
                     citations=citations_acc,
                     follow_up_questions=follow_ups_acc,
                     rewrite=rewrite_acc,
+                    latency_ms=timings_acc,
                 )
                 yield _format_done_sse_chunk(done_body)
                 continue
@@ -899,8 +924,19 @@ async def _iter_upstream_sse_as_gateway_tokens(response: httpx.Response) -> Asyn
                     citations=citations_acc,
                     follow_up_questions=follow_ups_acc,
                     rewrite=rewrite_acc,
+                    latency_ms=timings_acc,
                 )
                 yield _format_done_sse_chunk(done_body)
+                continue
+
+            if event_name in ("timings", "timings_ms", "latency", "latency_ms"):
+                try:
+                    parsed = json.loads(raw) if raw.strip() else {}
+                    stream_timings = orchestrator_latency_ms(parsed)
+                    if stream_timings:
+                        timings_acc = stream_timings
+                except json.JSONDecodeError:
+                    pass
                 continue
 
             if event_name == "citations":

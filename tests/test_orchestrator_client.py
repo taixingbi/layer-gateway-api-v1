@@ -19,17 +19,17 @@ from app.services.orchestrator_call_context import OrchestratorCallContext
 from app.services.orchestrator_client import OrchestratorClient, _gateway_done_payload
 
 
-def test_gateway_done_payload_includes_timings_ms():
+def test_gateway_done_payload_includes_latency_ms():
     raw = json.dumps(
         {
             "status": "ok",
-            "timings_ms": {"total": 3632.46, "rag": {"total": 2367.0}},
+            "latency_ms": {"total": 3632.46, "rag": {"total": 2367.0}},
             "citations": [],
             "follow_up_questions": [],
         }
     )
     body = _gateway_done_payload(raw, citations=[], follow_up_questions=[])
-    assert body["timings_ms"]["total"] == 3632.46
+    assert body["latency_ms"]["total"] == 3632.46
 
 
 def _payload() -> OrchestratorChatRequest:
@@ -261,7 +261,18 @@ async def test_flat_headers_stream_forwards_upstream_done_event():
 
     async def handler(request: httpx.Request):
         """Handler."""
-        return httpx.Response(200, content=sse, headers={"content-type": "text/event-stream"})
+        body = json.loads(request.content.decode())
+        if body.get("stream"):
+            return httpx.Response(200, content=sse, headers={"content-type": "text/event-stream"})
+        return httpx.Response(
+            200,
+            json={
+                "answer": "Hi",
+                "citations": [{"cite_id": 1}],
+                "follow_up_questions": ["Q1?", "Q2?"],
+                "latency_ms": {"total": 100.0},
+            },
+        )
 
     transport = httpx.MockTransport(handler)
     async with httpx.AsyncClient(base_url="http://test", transport=transport) as client:
@@ -303,7 +314,18 @@ async def test_flat_headers_stream_rag_events_aggregate_into_gateway_done():
 
     async def handler(request: httpx.Request):
         """Handler."""
-        return httpx.Response(200, content=sse, headers={"content-type": "text/event-stream"})
+        body = json.loads(request.content.decode())
+        if body.get("stream"):
+            return httpx.Response(200, content=sse, headers={"content-type": "text/event-stream"})
+        return httpx.Response(
+            200,
+            json={
+                "answer": "Hello world",
+                "citations": [cite],
+                "follow_up_questions": ["Q1?", "Q2?"],
+                "latency_ms": {"total": 250.0},
+            },
+        )
 
     transport = httpx.MockTransport(handler)
     async with httpx.AsyncClient(base_url="http://test", transport=transport) as client:
@@ -317,6 +339,7 @@ async def test_flat_headers_stream_rag_events_aggregate_into_gateway_done():
     assert done_data["status"] == "success"
     assert done_data["citations"] == [cite]
     assert done_data["follow_up_questions"] == ["Q1?", "Q2?"]
+    assert done_data["latency_ms"]["total"] == 250.0
 
 
 @pytest.mark.asyncio
@@ -397,6 +420,45 @@ async def test_chat_flat_non_stream_passes_rewrite():
 
 
 @pytest.mark.asyncio
+async def test_flat_headers_stream_supplements_timings_when_sse_done_has_citations_only():
+    """Stream may include citations on ``done`` but omit ``latency_ms``; gateway fills from non-stream JSON."""
+    settings = Settings(
+        orchestrator_retry_max_attempts=1,
+        orchestrator_contract="flat_headers",
+        orchestrator_chat_path="/orchestrator/answer",
+    )
+    cite = {"cite_id": 1, "source": "personal_profile"}
+    stream_sse = (
+        b'event: rewrite\ndata: {"text":"visa?"}\n\n'
+        b'event: token\ndata: {"text":"H4 EAD."}\n\n'
+        + f"event: done\ndata: {json.dumps({'status': 'success', 'citations': [cite], 'follow_up_questions': ['Q?']})}\n\n".encode()
+    )
+    json_body = {
+        "answer": "H4 EAD.",
+        "rewrite": "visa?",
+        "citations": [cite],
+        "follow_up_questions": ["Q?"],
+        "latency_ms": {"total": 3632.46, "rag": {"total": 2367.0}},
+    }
+
+    async def handler(request: httpx.Request):
+        body = json.loads(request.content.decode())
+        if body.get("stream"):
+            return httpx.Response(200, content=stream_sse, headers={"content-type": "text/event-stream"})
+        return httpx.Response(200, json=json_body)
+
+    transport = httpx.MockTransport(handler)
+    async with httpx.AsyncClient(base_url="http://test", transport=transport) as client:
+        orchestrator = OrchestratorClient(client=client, settings=settings)
+        chunks = [c async for c in orchestrator.stream_chat(_payload(), _ctx(stream=True))]
+
+    done_chunk = next(c for c in chunks if c.lstrip().startswith("event: done"))
+    done_data = json.loads([ln for ln in done_chunk.splitlines() if ln.startswith("data:")][0][5:].strip())
+    assert done_data["citations"] == [cite]
+    assert done_data["latency_ms"]["total"] == 3632.46
+
+
+@pytest.mark.asyncio
 async def test_flat_headers_stream_supplements_metadata_when_sse_lacks_citations():
     """Some upstreams stream tokens + empty ``done`` but return citations on non-stream JSON."""
     settings = Settings(
@@ -411,6 +473,7 @@ async def test_flat_headers_stream_supplements_metadata_when_sse_lacks_citations
         "answer": "Answer",
         "citations": [{"cite_id": 1, "source": "profile"}],
         "follow_up_questions": ["Follow up?"],
+        "latency_ms": {"total": 500.0},
     }
 
     async def handler(request: httpx.Request):
@@ -429,6 +492,7 @@ async def test_flat_headers_stream_supplements_metadata_when_sse_lacks_citations
     done_data = json.loads([ln for ln in done_chunk.splitlines() if ln.startswith("data:")][0][5:].strip())
     assert done_data["citations"] == [{"cite_id": 1, "source": "profile"}]
     assert done_data["follow_up_questions"] == ["Follow up?"]
+    assert done_data["latency_ms"]["total"] == 500.0
 
 
 @pytest.mark.asyncio
@@ -445,6 +509,7 @@ async def test_gateway_json_stream_appends_done_with_metadata_from_non_stream():
         "citations": [{"cite_id": 1}],
         "follow_up_questions": ["Next?"],
         "usage": {},
+        "latency_ms": {"total": 1200.0},
     }
     calls = {"stream": 0, "json": 0}
 
@@ -467,3 +532,4 @@ async def test_gateway_json_stream_appends_done_with_metadata_from_non_stream():
     done_data = json.loads([ln for ln in done_chunk.splitlines() if ln.startswith("data:")][0][5:].strip())
     assert done_data["citations"] == [{"cite_id": 1}]
     assert done_data["follow_up_questions"] == ["Next?"]
+    assert done_data["latency_ms"]["total"] == 1200.0

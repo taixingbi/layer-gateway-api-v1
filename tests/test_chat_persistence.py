@@ -37,7 +37,7 @@ class StubOrchestratorClient:
                 "citations": [{"source": "personal_profile"}],
                 "follow_up_questions": [],
                 "usage": {"input_tokens": 1, "output_tokens": 2, "model": "qwen2.5-7b"},
-                "timings_ms": {"total": 1200.5, "rag": {"total": 900}},
+                "latency_ms": {"total": 1200.5, "rag": {"total": 900}},
                 "route": "rag",
             },
         )()
@@ -57,7 +57,8 @@ class StubStreamRewriteThenAnswerClient:
         yield 'event: token\ndata: {"text":"I\'m doing well and ready to help."}\n\n'
         yield (
             'event: done\ndata: {"status":"success","rewrite":"how are you?",'
-            '"citations":[{"source":"personal_profile"}],"follow_up_questions":[]}\n\n'
+            '"citations":[{"source":"personal_profile"}],"follow_up_questions":[],'
+            '"latency_ms":{"total":900.0,"intent_router":100}}\n\n'
         )
 
 
@@ -98,7 +99,8 @@ def test_chat_persists_on_success(
     assert response.status_code == 200
     body = response.json()
     assert body["conversation_id"] == conv_id
-    assert body["timings_ms"]["total"] == 1200.5
+    assert body["latency_ms"]["gateway_api"]["total"] >= 0
+    assert body["latency_ms"]["orchestrator"]["total"] == 1200.5
     assert mock_ensure.called
     assert mock_load.called
     assert mock_append.call_count == 2
@@ -108,13 +110,13 @@ def test_chat_persists_on_success(
     assert mock_append.call_args_list[0].kwargs.get("metadata") is None
     assert mock_append.call_args_list[1].args[4] == "H4 EAD. No visa sponsorship required."
     assert mock_append.call_args_list[1].kwargs["status"] == "complete"
-    assert mock_append.call_args_list[1].kwargs["metadata"] == {
-        "rewrite": "what is taixing visa status",
-        "citations": [{"source": "personal_profile"}],
-        "model": "qwen2.5-7b",
-        "route": "rag",
-        "timings_ms": {"total": 1200.5, "rag": {"total": 900}},
-    }
+    meta = mock_append.call_args_list[1].kwargs["metadata"]
+    assert meta["rewrite"] == "what is taixing visa status"
+    assert meta["citations"] == [{"source": "personal_profile"}]
+    assert meta["model"] == "qwen2.5-7b"
+    assert meta["route"] == "rag"
+    assert meta["latency_ms"]["orchestrator"]["total"] == 1200.5
+    assert "gateway_api" in meta["latency_ms"]
 
 
 @patch("app.routes.chat.persistence_enabled", return_value=True)
@@ -151,6 +153,8 @@ def test_chat_stream_persists_assistant_without_rewrite(
     assert meta["rewrite"] == "how are you?"
     assert meta["citations"] == [{"source": "personal_profile"}]
     assert meta["route"] == default_chat_route_label()
+    assert meta["latency_ms"]["orchestrator"]["total"] == 900.0
+    assert "gateway_api" in meta["latency_ms"]
 
 
 @patch("app.routes.chat.persistence_enabled", return_value=False)

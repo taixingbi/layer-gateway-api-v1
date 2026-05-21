@@ -42,18 +42,21 @@ def test_merge_history_returns_db_when_client_shorter():
 
 
 def test_orchestrator_timings_ms_extracts_dict():
-    payload = {"timings_ms": {"total": 100.5, "rag": {"total": 80}}}
-    assert orchestrator_timings_ms(payload) == payload["timings_ms"]
+    payload = {"latency_ms": {"total": 100.5, "rag": {"total": 80}}}
+    assert orchestrator_timings_ms(payload) == payload["latency_ms"]
 
 
-def test_assistant_message_metadata_includes_timings_ms():
-    timings = {"total": 3632.46, "rag": {"total": 2367.0}}
+def test_assistant_message_metadata_includes_latency_ms():
+    latency = {
+        "gateway_api": {"total": 100},
+        "orchestrator": {"total": 3632.46, "rag": {"total": 2367.0}},
+    }
     meta = assistant_message_metadata(
         rewrite="visa",
-        timings_ms=timings,
+        latency_ms=latency,
     )
     assert meta is not None
-    assert meta["timings_ms"] == timings
+    assert meta["latency_ms"] == latency
 
 
 @patch("app.core.config.get_settings")

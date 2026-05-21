@@ -61,4 +61,5 @@ class OrchestratorChatResponse(BaseModel):
     citations: list[dict[str, Any]] = Field(default_factory=list)
     follow_up_questions: list[str] = Field(default_factory=list)
     usage: dict[str, Any] = Field(default_factory=dict)
-    timings_ms: dict[str, Any] | None = None
+    latency_ms: dict[str, Any] | None = None
+    timings_ms: dict[str, Any] | None = None  # legacy alias; prefer ``latency_ms``

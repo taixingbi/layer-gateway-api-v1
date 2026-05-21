@@ -1,6 +1,7 @@
 """Bearer authentication middleware (Supabase or JWKS JWT)."""
 
 import asyncio
+import time
 
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
@@ -46,6 +47,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
             )
 
         settings = get_settings()
+        auth_start = time.perf_counter()
         if settings.supabase_enabled:
             try:
                 request.state.auth_context = await asyncio.to_thread(
@@ -53,6 +55,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 )
             except SupabaseAuthError:
                 return _unauthorized()
+            request.state.auth_ms = (time.perf_counter() - auth_start) * 1000
             return await call_next(request)
 
         validator = getattr(request.app.state, "jwt_validator", None)
@@ -65,4 +68,5 @@ class AuthMiddleware(BaseHTTPMiddleware):
             return _unauthorized()
 
         request.state.auth_context = auth_context
+        request.state.auth_ms = (time.perf_counter() - auth_start) * 1000
         return await call_next(request)

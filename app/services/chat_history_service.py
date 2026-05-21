@@ -116,16 +116,10 @@ def _row_to_conversation_summary(row: dict) -> dict:
 
 
 def orchestrator_timings_ms(source: Any) -> dict[str, Any] | None:
-    """Extract ``timings_ms`` from orchestrator JSON (dict, Pydantic model, or stub)."""
-    if source is None:
-        return None
-    if isinstance(source, dict):
-        timings = source.get("timings_ms")
-    elif hasattr(source, "model_dump"):
-        timings = source.model_dump(mode="json").get("timings_ms")
-    else:
-        timings = getattr(source, "timings_ms", None)
-    return timings if isinstance(timings, dict) and timings else None
+    """Backward-compatible alias for :func:`app.services.chat_latency.orchestrator_latency_ms`."""
+    from app.services.chat_latency import orchestrator_latency_ms
+
+    return orchestrator_latency_ms(source)
 
 
 def orchestrator_payload_dict(source: Any) -> dict[str, Any]:
@@ -140,6 +134,7 @@ def orchestrator_payload_dict(source: Any) -> dict[str, Any]:
         "rewrite",
         "route",
         "usage",
+        "latency_ms",
         "timings_ms",
         "citations",
         "follow_up_questions",
@@ -166,6 +161,7 @@ def assistant_message_metadata(
     follow_up_questions: list[str] | None = None,
     model: str | None = None,
     route: str | None = None,
+    latency_ms: dict[str, Any] | None = None,
     timings_ms: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     """Build optional ``metadata`` jsonb for assistant rows (omit when empty)."""
@@ -180,8 +176,9 @@ def assistant_message_metadata(
         meta["model"] = model.strip()
     route_label = (route or "").strip() or default_chat_route_label()
     meta["route"] = route_label
-    if timings_ms:
-        meta["timings_ms"] = timings_ms
+    stored_latency = latency_ms or timings_ms
+    if stored_latency:
+        meta["latency_ms"] = stored_latency
     return meta or None
 
 

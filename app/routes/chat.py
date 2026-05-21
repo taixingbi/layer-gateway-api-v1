@@ -21,7 +21,6 @@ from app.services.chat_history_service import (
     merge_history,
     message_persist_status,
     orchestrator_payload_dict,
-    orchestrator_timings_ms,
     persistence_enabled,
     _model_from_usage,
     resolve_assistant_model_name,
@@ -34,6 +33,11 @@ from app.schemas.orchestrator import (
     OrchestratorClientInfo,
     OrchestratorContext,
     OrchestratorInput,
+)
+from app.services.chat_latency import (
+    attach_latency_to_payload,
+    chat_latency_recorder,
+    orchestrator_latency_ms,
 )
 from app.services.orchestrator_call_context import OrchestratorCallContext
 
@@ -235,6 +239,7 @@ def _persist_assistant_message(
     follow_up_questions: list[str] | None = None,
     usage: dict[str, Any] | None = None,
     done_payload: dict[str, Any] | None = None,
+    latency_ms: dict[str, Any] | None = None,
 ) -> str | None:
     """Insert assistant turn after successful orchestrator response; return message id."""
     conv_id = getattr(request.state, "chat_history_conversation_id", None)
@@ -245,17 +250,21 @@ def _persist_assistant_message(
     text = (answer or "").strip()
     if not text:
         return None
-    timings = orchestrator_timings_ms(done_payload)
+    latency = getattr(request.state, "chat_latency", None)
+    t_db = latency.measure() if latency else None
+    orch_latency = orchestrator_latency_ms(done_payload)
     route_from_done = (
         (done_payload or {}).get("route") if isinstance(done_payload, dict) else None
     )
+    if latency_ms is None and (orch_latency or latency):
+        latency_ms = chat_latency_recorder(request).build(request, orchestrator=orch_latency)
     metadata = assistant_message_metadata(
         rewrite=rewrite,
         citations=citations,
         follow_up_questions=follow_up_questions,
         model=resolve_assistant_model_name(usage=usage, done_payload=done_payload),
         route=route_from_done if isinstance(route_from_done, str) else None,
-        timings_ms=timings,
+        latency_ms=latency_ms,
     )
     try:
         msg_id = append_message(
@@ -269,6 +278,8 @@ def _persist_assistant_message(
         )
         if msg_id:
             request.state.last_assistant_message_id = msg_id
+        if latency and t_db is not None:
+            latency.add_db_write_assistant_message(t_db)
         return msg_id
     except ChatHistoryUnavailable:
         return None
@@ -348,7 +359,10 @@ async def chat(request: Request, payload: ChatRequest):
         method=request.method,
         **_chat_correlation_log_kwargs(request),
     )
+    latency = chat_latency_recorder(request)
+    t_validate = latency.measure()
     payload = _normalize_request(payload, request)
+    latency.add_request_validation(t_validate)
     # Validation checkpoint for request observability.
     log_event(
         "request_validated",
@@ -356,7 +370,9 @@ async def chat(request: Request, payload: ChatRequest):
         method=request.method,
         **_chat_correlation_log_kwargs(request),
     )
+    t_db_user = latency.measure()
     _prepare_chat_history(request, payload)
+    latency.add_db_write_user_message(t_db_user)
     orchestrator_payload = _build_orchestrator_request(payload, request)
     persisted_cid = getattr(request.state, "conversation_id", None)
     if persisted_cid:
@@ -382,9 +398,11 @@ async def chat(request: Request, payload: ChatRequest):
         # Non-stream path performs single request/response orchestration call.
         log_event("orchestrator_call_started", **_chat_correlation_log_kwargs(request))
         ctx = _build_call_context(request, orchestrator_payload, stream=False)
+        t_orch = latency.measure()
         result = await client.chat(orchestrator_payload, ctx)
+        latency.add_orchestrator_call(t_orch)
         log_event("orchestrator_call_succeeded", **_chat_correlation_log_kwargs(request))
-        timings = orchestrator_timings_ms(result)
+        orch_latency = orchestrator_latency_ms(result)
         assistant_message_id = _persist_assistant_message(
             request,
             result.answer,
@@ -407,7 +425,7 @@ async def chat(request: Request, payload: ChatRequest):
             citations=result.citations,
             follow_up_questions=getattr(result, "follow_up_questions", None) or [],
             usage=Usage(**result.usage) if result.usage else Usage(),
-            timings_ms=timings,
+            latency_ms=latency.build(request, orchestrator=orch_latency),
         )
         return JSONResponse(content=body.model_dump(mode="json", exclude_none=True))
     except HTTPException as exc:
@@ -451,7 +469,9 @@ async def _stream_response(request: Request, orchestrator_payload: OrchestratorC
     stream_citations: list[dict[str, Any]] = []
     stream_follow_ups: list[str] = []
     pending_done_body: dict[str, Any] | None = None
+    latency = chat_latency_recorder(request)
     try:
+        t_orch = latency.measure()
         # Forward normalized token events from orchestrator stream.
         async for token_event in client.stream_chat(orchestrator_payload, ctx):
             if upstream_first:
@@ -489,6 +509,7 @@ async def _stream_response(request: Request, orchestrator_payload: OrchestratorC
                 if rewrite_text:
                     stream_rewrite = rewrite_text
             yield token_event
+        latency.add_orchestrator_call(t_orch)
         if stream_failed:
             yield 'event: done\ndata: {"status":"error"}\n\n'
         else:
@@ -499,6 +520,20 @@ async def _stream_response(request: Request, orchestrator_payload: OrchestratorC
                 else None
             )
             stream_model = resolve_assistant_model_name(done_payload=done_for_model)
+            orch_latency = orchestrator_latency_ms(done_for_model)
+            done_body = (
+                dict(pending_done_body)
+                if isinstance(pending_done_body, dict)
+                else {"status": "success"}
+            )
+            if stream_model and not done_body.get("model"):
+                done_body["model"] = stream_model
+            if stream_rewrite and not done_body.get("rewrite"):
+                done_body["rewrite"] = stream_rewrite
+            if stream_citations and not done_body.get("citations"):
+                done_body["citations"] = stream_citations
+            if stream_follow_ups and not done_body.get("follow_up_questions"):
+                done_body["follow_up_questions"] = stream_follow_ups
             stream_assistant_message_id = _persist_assistant_message(
                 request,
                 "".join(assistant_parts),
@@ -508,6 +543,8 @@ async def _stream_response(request: Request, orchestrator_payload: OrchestratorC
                 usage=stream_usage,
                 done_payload=done_for_model,
             )
+            if stream_assistant_message_id:
+                done_body["assistant_message_id"] = stream_assistant_message_id
             if stream_assistant_message_id or stream_cid:
                 late_meta: dict[str, Any] = {}
                 if stream_cid:
@@ -517,24 +554,9 @@ async def _stream_response(request: Request, orchestrator_payload: OrchestratorC
                 if stream_model:
                     late_meta["model"] = stream_model
                 yield f"event: meta\ndata: {json.dumps(late_meta)}\n\n"
-            done_body = (
-                dict(pending_done_body)
-                if isinstance(pending_done_body, dict)
-                else {"status": "success"}
-            )
-            if stream_model and not done_body.get("model"):
-                done_body["model"] = stream_model
-            if stream_assistant_message_id:
-                done_body["assistant_message_id"] = stream_assistant_message_id
-            if stream_rewrite and not done_body.get("rewrite"):
-                done_body["rewrite"] = stream_rewrite
-            if stream_citations and not done_body.get("citations"):
-                done_body["citations"] = stream_citations
-            if stream_follow_ups and not done_body.get("follow_up_questions"):
-                done_body["follow_up_questions"] = stream_follow_ups
-            stream_timings = orchestrator_timings_ms(done_body)
-            if stream_timings and not done_body.get("timings_ms"):
-                done_body["timings_ms"] = stream_timings
+            t_stream_tail = latency.measure()
+            latency.add_response_stream(t_stream_tail)
+            attach_latency_to_payload(done_body, request, orchestrator=orch_latency)
             yield _format_done_sse_chunk(done_body)
     except HTTPException as exc:
         # Convert mapped HTTP failures to stream-safe error envelope.
