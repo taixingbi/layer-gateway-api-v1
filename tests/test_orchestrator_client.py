@@ -1,5 +1,6 @@
 """OrchestratorClient HTTP mapping, retries, and flat_headers contract."""
 
+import asyncio
 import json
 
 import httpx
@@ -520,6 +521,62 @@ async def test_flat_headers_stream_supplements_metadata_when_sse_lacks_citations
     assert done_data["follow_up_questions"] == ["Follow up?"]
     assert done_data["latency_ms"]["total"] == 500.0
     assert done_data["usage"]["prompt_tokens"] == 20
+
+
+@pytest.mark.asyncio
+async def test_flat_headers_stream_yields_tokens_before_done_supplement():
+    """flat_headers must forward rewrite/token chunks before the non-stream supplement finishes."""
+    settings = Settings(
+        orchestrator_retry_max_attempts=1,
+        orchestrator_contract="flat_headers",
+        orchestrator_chat_path="/v1/rag/query",
+    )
+    stream_sse = (
+        b'event: answer_delta\ndata: {"text":"He"}\n\n'
+        b'event: answer_delta\ndata: {"text":"llo"}\n\n'
+        b"event: done\ndata: {}\n\n"
+    )
+    supplement_ready = asyncio.Event()
+    supplement_release = asyncio.Event()
+
+    async def handler(request: httpx.Request):
+        body = json.loads(request.content.decode())
+        if body.get("stream"):
+            return httpx.Response(200, content=stream_sse, headers={"content-type": "text/event-stream"})
+        supplement_ready.set()
+        await supplement_release.wait()
+        return httpx.Response(
+            200,
+            json={
+                "answer": "Hi",
+                "citations": [],
+                "follow_up_questions": [],
+                "latency_ms": {"total": 1.0},
+                "usage": {},
+            },
+        )
+
+    received: list[str] = []
+
+    transport = httpx.MockTransport(handler)
+    async with httpx.AsyncClient(base_url="http://test", transport=transport) as client:
+        orchestrator = OrchestratorClient(client=client, settings=settings)
+
+        async def consume() -> None:
+            async for chunk in orchestrator.stream_chat(_payload(), _ctx(stream=True)):
+                received.append(chunk)
+
+        task = asyncio.create_task(consume())
+        await asyncio.wait_for(supplement_ready.wait(), timeout=2.0)
+        await asyncio.sleep(0)
+        pre_done = [c for c in received if not c.lstrip().startswith("event: done")]
+        assert len(pre_done) >= 2
+        assert all("event: token" in c for c in pre_done)
+        assert not any(c.lstrip().startswith("event: done") for c in received)
+        supplement_release.set()
+        await task
+
+    assert received[-1].lstrip().startswith("event: done")
 
 
 @pytest.mark.asyncio

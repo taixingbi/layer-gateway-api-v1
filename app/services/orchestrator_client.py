@@ -569,15 +569,21 @@ class OrchestratorClient:
                     content_type=response.headers.get("content-type"),
                     note="stream_opened",
                 )
-                chunks: list[str] = []
-                async for token_chunk in _iter_upstream_sse_as_gateway_tokens(response):
-                    chunks.append(token_chunk)
                 supplement = self._flat_stream_metadata_supplement(payload, flat_ctx)
-                chunks = await _enrich_stream_done_chunks(chunks, supplement)
-                done_summary = None
-                for chunk in chunks:
-                    if chunk.lstrip().startswith("event: done"):
-                        done_summary = _parse_done_sse_chunk(chunk)
+                pending_done_chunk: str | None = None
+                streamed_chunk_count = 0
+                async for token_chunk in _iter_upstream_sse_as_gateway_tokens(response):
+                    if token_chunk.lstrip().startswith("event: done"):
+                        pending_done_chunk = token_chunk
+                        continue
+                    streamed_chunk_count += 1
+                    yield token_chunk
+                enriched_done = await _enrich_stream_done_chunks(
+                    [pending_done_chunk] if pending_done_chunk else [],
+                    supplement,
+                )
+                done_chunk = enriched_done[-1] if enriched_done else _format_done_sse_chunk({"status": "success"})
+                done_summary = _parse_done_sse_chunk(done_chunk)
                 _log_orchestrator_response(
                     settings=self._settings,
                     method="POST",
@@ -585,11 +591,14 @@ class OrchestratorClient:
                     ctx=flat_ctx,
                     stream=True,
                     status_code=response.status_code,
-                    body={"gateway_chunk_count": len(chunks), "done": done_summary},
+                    body={
+                        "gateway_chunk_count": streamed_chunk_count + 1,
+                        "streamed_before_done": streamed_chunk_count,
+                        "done": done_summary,
+                    },
                     note="stream_closed",
                 )
-                for token_chunk in chunks:
-                    yield token_chunk
+                yield done_chunk
         except httpx.TimeoutException as exc:
             raise HTTPException(status_code=504, detail="Orchestrator stream timeout") from exc
 
