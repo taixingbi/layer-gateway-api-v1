@@ -99,8 +99,8 @@ def test_chat_persists_on_success(
     assert response.status_code == 200
     body = response.json()
     assert body["conversation_id"] == conv_id
-    assert body["latency_ms"]["gateway_api"]["total"] >= 0
-    assert body["latency_ms"]["orchestrator"]["total"] == 1200.5
+    assert body["latency_ms"]["total"] >= 0
+    assert body["latency_ms"]["orchestrator"]["workflow"]["total"] == 1200.5
     assert mock_ensure.called
     assert mock_load.called
     assert mock_append.call_count == 2
@@ -115,8 +115,8 @@ def test_chat_persists_on_success(
     assert meta["citations"] == [{"source": "personal_profile"}]
     assert meta["model"] == "qwen2.5-7b"
     assert meta["route"] == "rag"
-    assert meta["latency_ms"]["orchestrator"]["total"] == 1200.5
-    assert "gateway_api" in meta["latency_ms"]
+    assert meta["latency_ms"]["orchestrator"]["workflow"]["total"] == 1200.5
+    assert "storage" in meta["latency_ms"]
 
 
 @patch("app.routes.chat.persistence_enabled", return_value=True)
@@ -153,8 +153,8 @@ def test_chat_stream_persists_assistant_without_rewrite(
     assert meta["rewrite"] == "how are you?"
     assert meta["citations"] == [{"source": "personal_profile"}]
     assert meta["route"] == default_chat_route_label()
-    assert meta["latency_ms"]["orchestrator"]["total"] == 900.0
-    assert "gateway_api" in meta["latency_ms"]
+    assert meta["latency_ms"]["orchestrator"]["workflow"]["total"] == 900.0
+    assert "storage" in meta["latency_ms"]
 
 
 @patch("app.routes.chat.persistence_enabled", return_value=False)

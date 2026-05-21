@@ -48,8 +48,14 @@ def test_orchestrator_timings_ms_extracts_dict():
 
 def test_assistant_message_metadata_includes_latency_ms():
     latency = {
-        "gateway_api": {"total": 100},
-        "orchestrator": {"total": 3632.46, "rag": {"total": 2367.0}},
+        "total": 4000,
+        "auth": 10,
+        "validation": 0,
+        "storage": {"total": 50, "write_user_message": 30, "write_assistant_message": 20},
+        "orchestrator": {
+            "proxy_total": 3940,
+            "workflow": {"total": 3632.46, "rag": {"total": 2367.0}},
+        },
     }
     meta = assistant_message_metadata(
         rewrite="visa",

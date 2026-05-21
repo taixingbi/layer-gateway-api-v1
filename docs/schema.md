@@ -81,7 +81,7 @@ Example:
 | `usage` | object | Yes | Token usage |
 | `usage.input_tokens` | integer | Yes | Default `0` |
 | `usage.output_tokens` | integer | Yes | Default `0` |
-| `latency_ms` | object | No | Nested gateway + orchestrator latency (also stored on assistant `messages.metadata`) |
+| `latency_ms` | object | No | Request latency envelope: `total`, `auth`, `validation`, `storage`, `orchestrator` (also stored on assistant `messages.metadata`) |
 | `error` | object | No | Omitted on success; see [Error object](#error-object) |
 
 Example:
@@ -108,6 +108,29 @@ Example:
   "usage": {
     "input_tokens": 0,
     "output_tokens": 0
+  },
+  "latency_ms": {
+    "total": 4896,
+    "auth": 371,
+    "validation": 0,
+    "storage": {
+      "total": 939,
+      "write_user_message": 679,
+      "write_assistant_message": 260
+    },
+    "orchestrator": {
+      "proxy_total": 3586,
+      "workflow": {
+        "total": 3567.34,
+        "intent_router": 1239.17,
+        "rag": {
+          "total": 2322.89,
+          "retrieval": { "total": 306, "embed": 111, "retrieve": 56, "rerank": 139 },
+          "generation": { "total": 1930, "answer": 346, "follow_up": 1584 },
+          "follow_up_rerank": 77
+        }
+      }
+    }
   }
 }
 ```

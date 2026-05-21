@@ -8,24 +8,37 @@ from typing import Any
 from starlette.requests import Request
 
 
-def orchestrator_latency_ms(source: Any) -> dict[str, Any] | None:
-    """Extract orchestrator latency object from JSON, Pydantic model, or SSE ``done`` payload."""
+def _round_ms(value: float) -> int:
+    return int(round(value))
+
+
+def orchestrator_workflow_from_source(source: Any) -> dict[str, Any] | None:
+    """Extract orchestrator workflow timings (flat upstream JSON, not the gateway envelope)."""
     if source is None:
         return None
     if isinstance(source, dict):
+        if "workflow" in source and isinstance(source["workflow"], dict):
+            return source["workflow"]
         nested = source.get("latency_ms")
-        if isinstance(nested, dict) and nested.get("orchestrator"):
-            nested = nested["orchestrator"]
-        if isinstance(nested, dict) and nested:
-            return nested
+        if isinstance(nested, dict):
+            orch = nested.get("orchestrator")
+            if isinstance(orch, dict) and isinstance(orch.get("workflow"), dict):
+                return orch["workflow"]
+            if "storage" in nested or "auth" in nested:
+                return None
+            if nested:
+                return nested
         timings = source.get("latency_ms") or source.get("timings_ms") or source.get("timings")
         if isinstance(timings, dict) and timings.get("orchestrator"):
-            return timings["orchestrator"]
-        return timings if isinstance(timings, dict) and timings else None
+            orch = timings["orchestrator"]
+            if isinstance(orch, dict) and isinstance(orch.get("workflow"), dict):
+                return orch["workflow"]
+        if isinstance(timings, dict) and timings and "storage" not in timings and "auth" not in timings:
+            return timings
+        return None
     if hasattr(source, "model_dump"):
-        data = source.model_dump(mode="json")
-        return orchestrator_latency_ms(data)
-    return orchestrator_latency_ms(
+        return orchestrator_workflow_from_source(source.model_dump(mode="json"))
+    return orchestrator_workflow_from_source(
         {
             "latency_ms": getattr(source, "latency_ms", None),
             "timings_ms": getattr(source, "timings_ms", None),
@@ -33,8 +46,27 @@ def orchestrator_latency_ms(source: Any) -> dict[str, Any] | None:
     )
 
 
-def _round_gateway_ms(value: float) -> int:
-    return int(round(value))
+def orchestrator_latency_ms(source: Any) -> dict[str, Any] | None:
+    """Backward-compatible alias: returns workflow dict or legacy flat orchestrator timings."""
+    return orchestrator_workflow_from_source(source)
+
+
+def build_orchestrator_section(
+    workflow: dict[str, Any] | None,
+    *,
+    proxy_total_ms: float,
+) -> dict[str, Any] | None:
+    """Wrap upstream workflow timings with gateway-measured ``proxy_total``."""
+    if not workflow and proxy_total_ms <= 0:
+        return None
+    if isinstance(workflow, dict) and "workflow" in workflow and "proxy_total" in workflow:
+        section = dict(workflow)
+        section["proxy_total"] = _round_ms(proxy_total_ms or section.get("proxy_total", 0))
+        return section
+    return {
+        "proxy_total": _round_ms(proxy_total_ms),
+        "workflow": dict(workflow) if isinstance(workflow, dict) else {},
+    }
 
 
 def build_chat_latency_ms(
@@ -44,32 +76,35 @@ def build_chat_latency_ms(
     db_write_user_message_ms: float = 0.0,
     orchestrator_call_ms: float = 0.0,
     db_write_assistant_message_ms: float = 0.0,
-    response_stream_ms: float = 0.0,
-    orchestrator: dict[str, Any] | None = None,
+    orchestrator_workflow: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build ``latency_ms`` for gateway chat JSON and SSE ``done`` events."""
-    gateway_api: dict[str, Any] = {
-        "auth": _round_gateway_ms(auth_ms or 0),
-        "request_validation": _round_gateway_ms(request_validation_ms),
-        "db_write_user_message": _round_gateway_ms(db_write_user_message_ms),
-        "orchestrator_call": _round_gateway_ms(orchestrator_call_ms),
-        "db_write_assistant_message": _round_gateway_ms(db_write_assistant_message_ms),
-        "response_stream": _round_gateway_ms(response_stream_ms),
+    auth = _round_ms(auth_ms or 0)
+    validation = _round_ms(request_validation_ms)
+    write_user = _round_ms(db_write_user_message_ms)
+    write_assistant = _round_ms(db_write_assistant_message_ms)
+    storage: dict[str, Any] = {
+        "total": write_user + write_assistant,
+        "write_user_message": write_user,
+        "write_assistant_message": write_assistant,
     }
-    gateway_api["total"] = sum(
-        gateway_api[k]
-        for k in (
-            "auth",
-            "request_validation",
-            "db_write_user_message",
-            "orchestrator_call",
-            "db_write_assistant_message",
-            "response_stream",
-        )
+    orch_section = build_orchestrator_section(
+        orchestrator_workflow,
+        proxy_total_ms=orchestrator_call_ms,
     )
-    out: dict[str, Any] = {"gateway_api": gateway_api}
-    if orchestrator:
-        out["orchestrator"] = orchestrator
+    proxy_total = (
+        orch_section["proxy_total"]
+        if orch_section
+        else _round_ms(orchestrator_call_ms)
+    )
+    out: dict[str, Any] = {
+        "total": auth + validation + storage["total"] + proxy_total,
+        "auth": auth,
+        "validation": validation,
+        "storage": storage,
+    }
+    if orch_section:
+        out["orchestrator"] = orch_section
     return out
 
 
@@ -87,7 +122,6 @@ class ChatLatencyRecorder:
         self.db_write_user_message_ms = 0.0
         self.orchestrator_call_ms = 0.0
         self.db_write_assistant_message_ms = 0.0
-        self.response_stream_ms = 0.0
 
     def measure(self) -> float:
         """Return a perf_counter snapshot."""
@@ -106,17 +140,21 @@ class ChatLatencyRecorder:
         self.db_write_assistant_message_ms += (time.perf_counter() - start) * 1000
 
     def add_response_stream(self, start: float) -> None:
-        self.response_stream_ms += (time.perf_counter() - start) * 1000
+        """Legacy hook; response assembly is included in orchestrator proxy time."""
 
-    def build(self, request: Request, *, orchestrator: dict[str, Any] | None) -> dict[str, Any]:
+    def build(
+        self,
+        request: Request,
+        *,
+        orchestrator_workflow: dict[str, Any] | None,
+    ) -> dict[str, Any]:
         return build_chat_latency_ms(
             auth_ms=auth_latency_ms(request),
             request_validation_ms=self.request_validation_ms,
             db_write_user_message_ms=self.db_write_user_message_ms,
             orchestrator_call_ms=self.orchestrator_call_ms,
             db_write_assistant_message_ms=self.db_write_assistant_message_ms,
-            response_stream_ms=self.response_stream_ms,
-            orchestrator=orchestrator,
+            orchestrator_workflow=orchestrator_workflow,
         )
 
 
@@ -133,13 +171,17 @@ def attach_latency_to_payload(
     payload: dict[str, Any],
     request: Request,
     *,
-    orchestrator: dict[str, Any] | None,
+    orchestrator_workflow: dict[str, Any] | None,
 ) -> None:
-    """Set nested ``latency_ms`` on a response/done dict; drop legacy flat timing keys."""
+    """Set ``latency_ms`` on a response/done dict; drop legacy timing keys."""
     payload.pop("timings_ms", None)
-    flat = payload.get("latency_ms")
-    if isinstance(flat, dict) and "gateway_api" not in flat and "orchestrator" not in flat:
-        orchestrator = orchestrator or flat
+    raw = payload.get("latency_ms")
+    if orchestrator_workflow is None and isinstance(raw, dict):
+        if "orchestrator" in raw and isinstance(raw["orchestrator"], dict):
+            orchestrator_workflow = raw["orchestrator"].get("workflow")
+        elif "storage" not in raw and "auth" not in raw:
+            orchestrator_workflow = raw
+    if isinstance(raw, dict):
         payload.pop("latency_ms", None)
     recorder = chat_latency_recorder(request)
-    payload["latency_ms"] = recorder.build(request, orchestrator=orchestrator)
+    payload["latency_ms"] = recorder.build(request, orchestrator_workflow=orchestrator_workflow)

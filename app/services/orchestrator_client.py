@@ -12,8 +12,13 @@ from app.core.config import Settings
 from app.core.logging import log_event
 from app.core.time_util import eastern_from_timestamp
 from app.schemas.orchestrator import OrchestratorChatRequest, OrchestratorChatResponse
-from app.services.chat_latency import orchestrator_latency_ms
+from app.services.chat_latency import orchestrator_workflow_from_source
 from app.services.orchestrator_call_context import OrchestratorCallContext
+
+
+def _upstream_has_workflow_timings(payload: dict[str, Any]) -> bool:
+    """True when payload already carries orchestrator workflow timings."""
+    return orchestrator_workflow_from_source(payload) is not None
 
 _ORCH_LOG_BODY_MAX_CHARS = 8000
 ORCHESTRATOR_HTTP_LOGGER = "layer_gateway.orchestrator_http"
@@ -463,7 +468,7 @@ class OrchestratorClient:
                         continue
                     if not isinstance(parsed, dict):
                         continue
-                    ndjson_timings = orchestrator_latency_ms(parsed)
+                    ndjson_timings = orchestrator_workflow_from_source(parsed)
                     if ndjson_timings:
                         timings_acc = ndjson_timings
                     event_type = parsed.get("type")
@@ -484,7 +489,7 @@ class OrchestratorClient:
             done_body = _done_body_from_orchestrator_result(result)
             if rewrite_acc and not done_body.get("rewrite"):
                 done_body["rewrite"] = rewrite_acc
-            if timings_acc and not orchestrator_latency_ms(done_body):
+            if timings_acc and not _upstream_has_workflow_timings(done_body):
                 done_body["latency_ms"] = timings_acc
             _log_orchestrator_response(
                 settings=self._settings,
@@ -607,7 +612,7 @@ class OrchestratorClient:
                 for q in (result.follow_up_questions or [])
                 if isinstance(q, str) and str(q).strip()
             ]
-            return cites, follow_ups, orchestrator_latency_ms(result)
+            return cites, follow_ups, orchestrator_workflow_from_source(result)
 
         return _fetch
 
@@ -746,9 +751,9 @@ def _done_body_from_orchestrator_result(result: OrchestratorChatResponse) -> dic
         body["citations"] = result.citations
     if result.follow_up_questions:
         body["follow_up_questions"] = result.follow_up_questions
-    orch_latency = orchestrator_latency_ms(result)
-    if orch_latency:
-        body["latency_ms"] = orch_latency
+    orch_workflow = orchestrator_workflow_from_source(result)
+    if orch_workflow:
+        body["latency_ms"] = orch_workflow
     return body
 
 
@@ -793,7 +798,7 @@ async def _enrich_stream_done_chunks(
     needs_supplement = supplement is not None and (
         not done_body.get("citations")
         or not done_body.get("follow_up_questions")
-        or not orchestrator_latency_ms(done_body)
+        or not _upstream_has_workflow_timings(done_body)
     )
     if needs_supplement:
         try:
@@ -802,7 +807,7 @@ async def _enrich_stream_done_chunks(
                 done_body["citations"] = s_cites
             if s_follows and not done_body.get("follow_up_questions"):
                 done_body["follow_up_questions"] = s_follows
-            if s_timings and not orchestrator_latency_ms(done_body):
+            if s_timings and not _upstream_has_workflow_timings(done_body):
                 done_body["latency_ms"] = s_timings
         except HTTPException:
             raise
@@ -852,7 +857,7 @@ def _gateway_done_payload(
     upstream_follow = parsed.get("follow_up_questions")
     if isinstance(upstream_follow, list) and upstream_follow:
         body["follow_up_questions"] = [str(q) for q in upstream_follow if q]
-    upstream_timings = orchestrator_latency_ms(parsed)
+    upstream_timings = orchestrator_workflow_from_source(parsed)
     if upstream_timings:
         body["latency_ms"] = upstream_timings
     elif latency_ms:
@@ -885,7 +890,7 @@ async def _iter_upstream_sse_as_gateway_tokens(response: httpx.Response) -> Asyn
 
             ndjson_type, ndjson = _orchestrator_sse_ndjson_type(raw)
             if ndjson is not None:
-                ndjson_timings = orchestrator_latency_ms(ndjson)
+                ndjson_timings = orchestrator_workflow_from_source(ndjson)
                 if ndjson_timings:
                     timings_acc = ndjson_timings
             if ndjson_type == "rewrite":
@@ -932,7 +937,7 @@ async def _iter_upstream_sse_as_gateway_tokens(response: httpx.Response) -> Asyn
             if event_name in ("timings", "timings_ms", "latency", "latency_ms"):
                 try:
                     parsed = json.loads(raw) if raw.strip() else {}
-                    stream_timings = orchestrator_latency_ms(parsed)
+                    stream_timings = orchestrator_workflow_from_source(parsed)
                     if stream_timings:
                         timings_acc = stream_timings
                 except json.JSONDecodeError:

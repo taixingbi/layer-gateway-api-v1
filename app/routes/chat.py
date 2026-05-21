@@ -37,7 +37,7 @@ from app.schemas.orchestrator import (
 from app.services.chat_latency import (
     attach_latency_to_payload,
     chat_latency_recorder,
-    orchestrator_latency_ms,
+    orchestrator_workflow_from_source,
 )
 from app.services.orchestrator_call_context import OrchestratorCallContext
 
@@ -252,12 +252,14 @@ def _persist_assistant_message(
         return None
     latency = getattr(request.state, "chat_latency", None)
     t_db = latency.measure() if latency else None
-    orch_latency = orchestrator_latency_ms(done_payload)
+    orch_workflow = orchestrator_workflow_from_source(done_payload)
     route_from_done = (
         (done_payload or {}).get("route") if isinstance(done_payload, dict) else None
     )
-    if latency_ms is None and (orch_latency or latency):
-        latency_ms = chat_latency_recorder(request).build(request, orchestrator=orch_latency)
+    if latency_ms is None and (orch_workflow or latency):
+        latency_ms = chat_latency_recorder(request).build(
+            request, orchestrator_workflow=orch_workflow
+        )
     metadata = assistant_message_metadata(
         rewrite=rewrite,
         citations=citations,
@@ -402,7 +404,7 @@ async def chat(request: Request, payload: ChatRequest):
         result = await client.chat(orchestrator_payload, ctx)
         latency.add_orchestrator_call(t_orch)
         log_event("orchestrator_call_succeeded", **_chat_correlation_log_kwargs(request))
-        orch_latency = orchestrator_latency_ms(result)
+        orch_workflow = orchestrator_workflow_from_source(result)
         assistant_message_id = _persist_assistant_message(
             request,
             result.answer,
@@ -425,7 +427,7 @@ async def chat(request: Request, payload: ChatRequest):
             citations=result.citations,
             follow_up_questions=getattr(result, "follow_up_questions", None) or [],
             usage=Usage(**result.usage) if result.usage else Usage(),
-            latency_ms=latency.build(request, orchestrator=orch_latency),
+            latency_ms=latency.build(request, orchestrator_workflow=orch_workflow),
         )
         return JSONResponse(content=body.model_dump(mode="json", exclude_none=True))
     except HTTPException as exc:
@@ -520,7 +522,7 @@ async def _stream_response(request: Request, orchestrator_payload: OrchestratorC
                 else None
             )
             stream_model = resolve_assistant_model_name(done_payload=done_for_model)
-            orch_latency = orchestrator_latency_ms(done_for_model)
+            orch_workflow = orchestrator_workflow_from_source(done_for_model)
             done_body = (
                 dict(pending_done_body)
                 if isinstance(pending_done_body, dict)
@@ -554,9 +556,9 @@ async def _stream_response(request: Request, orchestrator_payload: OrchestratorC
                 if stream_model:
                     late_meta["model"] = stream_model
                 yield f"event: meta\ndata: {json.dumps(late_meta)}\n\n"
-            t_stream_tail = latency.measure()
-            latency.add_response_stream(t_stream_tail)
-            attach_latency_to_payload(done_body, request, orchestrator=orch_latency)
+            attach_latency_to_payload(
+                done_body, request, orchestrator_workflow=orch_workflow
+            )
             yield _format_done_sse_chunk(done_body)
     except HTTPException as exc:
         # Convert mapped HTTP failures to stream-safe error envelope.
