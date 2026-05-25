@@ -207,8 +207,13 @@ class OrchestratorClient:
         return h
 
     def _flat_json_body(self, payload: OrchestratorChatRequest, ctx: OrchestratorCallContext) -> dict[str, Any]:
-        """Build minimal JSON body for flat_headers chat POST."""
-        body: dict[str, Any] = {"question": payload.input.question, "stream": ctx.stream}
+        """Build minimal JSON body for flat_headers chat POST.
+
+        Orchestrator defaults ``stream`` to true; only send ``"stream": false`` for non-stream.
+        """
+        body: dict[str, Any] = {"question": payload.input.question}
+        if not ctx.stream:
+            body["stream"] = False
         if ctx.conversation_id:
             body["conversation_id"] = ctx.conversation_id
         if payload.input.history:

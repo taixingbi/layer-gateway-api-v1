@@ -229,9 +229,9 @@ async def test_flat_headers_stream_parses_sse_tokens():
     async def handler(request: httpx.Request):
         """Handler."""
         body = json.loads(request.content.decode())
-        if body.get("stream"):
+        if body.get("stream", True):
             assert request.headers.get("accept") == "text/event-stream"
-            assert body == {"question": "Hello", "stream": True}
+            assert body == {"question": "Hello"}
             return httpx.Response(200, content=sse, headers={"content-type": "text/event-stream"})
         return httpx.Response(
             200,
@@ -280,7 +280,7 @@ async def test_flat_headers_stream_forwards_upstream_done_event():
     async def handler(request: httpx.Request):
         """Handler."""
         body = json.loads(request.content.decode())
-        if body.get("stream"):
+        if body.get("stream", True):
             return httpx.Response(200, content=sse, headers={"content-type": "text/event-stream"})
         return httpx.Response(
             200,
@@ -333,7 +333,7 @@ async def test_flat_headers_stream_rag_events_aggregate_into_gateway_done():
     async def handler(request: httpx.Request):
         """Handler."""
         body = json.loads(request.content.decode())
-        if body.get("stream"):
+        if body.get("stream", True):
             return httpx.Response(200, content=sse, headers={"content-type": "text/event-stream"})
         return httpx.Response(
             200,
@@ -386,7 +386,7 @@ async def test_flat_headers_stream_orchestrator_rewrite_not_emitted_as_token():
     async def handler(request: httpx.Request):
         """Handler."""
         body = json.loads(request.content.decode())
-        if body.get("stream"):
+        if body.get("stream", True):
             return httpx.Response(200, content=sse, headers={"content-type": "text/event-stream"})
         return httpx.Response(200, json=json_body)
 
@@ -470,7 +470,7 @@ async def test_flat_headers_stream_supplements_timings_when_sse_done_has_citatio
 
     async def handler(request: httpx.Request):
         body = json.loads(request.content.decode())
-        if body.get("stream"):
+        if body.get("stream", True):
             return httpx.Response(200, content=stream_sse, headers={"content-type": "text/event-stream"})
         return httpx.Response(200, json=json_body)
 
@@ -509,7 +509,7 @@ async def test_flat_headers_stream_supplements_metadata_when_sse_lacks_citations
     async def handler(request: httpx.Request):
         """Handler."""
         body = json.loads(request.content.decode())
-        if body.get("stream"):
+        if body.get("stream", True):
             return httpx.Response(200, content=stream_sse, headers={"content-type": "text/event-stream"})
         return httpx.Response(200, json=json_body)
 
@@ -544,7 +544,7 @@ async def test_flat_headers_stream_yields_tokens_before_done_supplement():
 
     async def handler(request: httpx.Request):
         body = json.loads(request.content.decode())
-        if body.get("stream"):
+        if body.get("stream", True):
             return httpx.Response(200, content=stream_sse, headers={"content-type": "text/event-stream"})
         supplement_ready.set()
         await supplement_release.wait()
@@ -612,7 +612,7 @@ async def test_flat_headers_stream_maps_json_envelope_to_token_and_done():
 
     async def handler(request: httpx.Request):
         body = json.loads(request.content.decode())
-        assert body.get("stream") is True
+        assert "stream" not in body
         return httpx.Response(
             200,
             content=json.dumps(json_body).encode(),

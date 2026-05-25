@@ -81,7 +81,7 @@ curl -sS -X POST "http://192.168.86.179:30185/v1/chat" \
   -d '{"message":"Hello","metadata":{"user_agent":"curl-jwt"}}' | jq .
 ```
 
-**SSE stream** (`Accept: text/event-stream` or JSON `"stream": true`)
+**SSE stream** (`Accept: text/event-stream` or omit `"stream"` on gateway body — default is stream; use `"stream": false` for JSON-only)
 
 ```bash
 curl -N -sS -X POST "http://192.168.86.179:30185/v1/chat" \
