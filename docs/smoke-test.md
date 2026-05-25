@@ -99,7 +99,7 @@ Expect lines starting with `event: meta`, then optional `event: rewrite`, then o
 
 ### HuntAI web (Next BFF) — translated SSE
 
-The **Next.js** app in **layer-web-v1** exposes `POST /v1/chat` on the **web** port (e.g. `http://localhost:3000`). It proxies to this gateway and **renames** SSE events for the browser (`status`, `result_chunk`, `stream_end`, …). To smoke the **full stack**, `curl -N` the **web** URL with a minimal body (`message`, optional `conversation_id` / `history`) and a session cookie from **`/login`** (or `Authorization: Bearer ${ACCESS_TOKEN}`). See **layer-web-v1** [`docs/design.md`](../../layer-web-v1/docs/design.md) (section *Verifying SSE with curl*).
+The **Next.js** app in **layer-web-v1** exposes `POST /api/v1/chat` on the **web** port (e.g. `http://localhost:3000`). It proxies to this gateway (`POST /v1/chat`) and **renames** SSE events for the browser (`status`, `result_chunk`, `stream_end`, …). To smoke the **full stack**, `curl -N` the **web** URL with a minimal body (`message`, optional `conversation_id` / `history`) and a session cookie from **`/login`** (or `Authorization: Bearer ${ACCESS_TOKEN}`). See **layer-web-v1** [`docs/design.md`](../../layer-web-v1/docs/design.md) (section *Verifying SSE with curl*).
 
 **Auth failure** (no `Authorization` header)
 
