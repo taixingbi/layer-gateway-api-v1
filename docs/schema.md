@@ -1,12 +1,12 @@
 # API request and response schemas
 
-Schemas for the **public gateway API** (`POST /api/chat`, `POST /api/feedback`). Source of truth: `app/schemas/*.py` and `app/routes/*.py`.
+Schemas for the **public gateway API** (`POST /v1/chat`, `POST /v1/feedback`). Source of truth: `app/schemas/*.py` and `app/routes/*.py`.
 
 Correlation IDs (`request_id`, `trace_id`, `session_id`) are taken from **headers** when present; the gateway mints missing values. Do **not** send `session_id`, `request_id`, or `trace_id` in JSON bodies (`extra="forbid"` on chat/feedback request models).
 
 ---
 
-## `POST /api/chat`
+## `POST /v1/chat`
 
 ### Request headers
 
@@ -63,7 +63,7 @@ Example:
 
 ---
 
-## `POST /api/chat` — non-stream response (`ChatResponse`)
+## `POST /v1/chat` — non-stream response (`ChatResponse`)
 
 **HTTP 200**, `Content-Type: application/json`.
 
@@ -76,9 +76,10 @@ Example:
 | `conversation_id` | string | No | UUID when chat history persistence ran |
 | `answer` | string | Yes | Assistant text |
 | `rewrite` | string | No | Intent-router rewritten question; omitted when absent |
+| `route` | string | No | Tool or intent name from orchestrator routing |
 | `citations` | array | Yes | Default `[]`; see [Citation object](#citation-object) |
 | `follow_up_questions` | array of string | Yes | Default `[]` |
-| `usage` | object | Yes | Orchestrator token usage (pass-through); includes `prompt_tokens`, `completion_tokens`, `total_tokens`, nested `intent_router` / `rag`, and legacy aliases `input_tokens` / `output_tokens` |
+| `usage` | object | Yes | Orchestrator token usage (pass-through); includes `prompt_tokens`, `completion_tokens`, `total_tokens`, nested `intent_router` / `tool_rag` / `tool_github_search`, and legacy aliases `input_tokens` / `output_tokens` |
 | `latency_ms` | object | No | Request latency envelope: `total`, `auth`, `validation`, `storage`, `orchestrator` (also stored on assistant `messages.metadata`) |
 | `error` | object | No | Omitted on success; see [Error object](#error-object) |
 
@@ -150,7 +151,7 @@ Example:
 
 ---
 
-## `POST /api/chat` — stream response (SSE)
+## `POST /v1/chat` — stream response (SSE)
 
 Enable with **`Accept: text/event-stream`** and/or **`"stream": true`** in the JSON body.
 
@@ -183,6 +184,18 @@ Intent-router rewritten question (emitted before answer tokens when upstream pro
 |-------|------|-------------|
 | `text` | string | Rewritten question |
 
+### `event: route`
+
+Routing decision from orchestrator (passthrough when upstream emits `type: route`).
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `type` | string | `"route"` |
+| `route` | string | e.g. `tool`, `direct_reply`, `clarify`, `reject` |
+| `route_detail` | object | `type`, `name`, `confidence`, optional `reason` |
+| `route_source` | string | e.g. `deterministic_rule`, `llm_router` |
+| `text` | string | Rewritten question (same as rewrite when present) |
+
 ### `event: token`
 
 Incremental answer text.
@@ -199,8 +212,13 @@ Terminal success (metadata may be filled from upstream SSE and/or a supplemental
 |-------|------|-------------|
 | `status` | string | `"success"` |
 | `rewrite` | string | Optional; same as `event: rewrite` when not emitted earlier |
+| `route` | string | Optional; tool or intent name (e.g. `github_search`, `help`) |
+| `route_detail` | object | Optional; normalized route detail |
+| `route_source` | string | Optional; routing provenance |
 | `citations` | array | Optional; [Citation object](#citation-object) |
 | `follow_up_questions` | array of string | Optional |
+| `usage` | object | Optional; may include `tool_rag`, `tool_github_search`, `intent_router`, … |
+| `latency_ms` | object | Optional; gateway envelope with orchestrator workflow |
 
 Example:
 
@@ -228,7 +246,7 @@ Stream failure envelope.
 
 ---
 
-## `POST /api/feedback`
+## `POST /v1/feedback`
 
 Persists to Supabase **`message_feedback`** when configured. Does **not** forward to the orchestrator.
 
@@ -317,7 +335,7 @@ Request example (thumbs down):
 
 ### History message
 
-Used in `POST /api/chat` `history` and forwarded to the orchestrator.
+Used in `POST /v1/chat` `history` and forwarded to the orchestrator.
 
 | Field | Type | Required | Constraints |
 |-------|------|----------|-------------|
@@ -345,7 +363,7 @@ Used in JSON `ChatResponse.error` when present.
 | `message` | string | Human-readable message |
 | `details` | object | Optional extra context |
 
-### Common HTTP errors (`POST /api/chat`)
+### Common HTTP errors (`POST /v1/chat`)
 
 | Status | When |
 |--------|------|
@@ -383,11 +401,11 @@ Gateway → orchestrator:
 
 **`gateway_json`:** history is under `input.history` in the nested orchestrator body (alongside `input.question`).
 
-Upstream non-stream JSON (`OrchestratorChatResponse`): `answer`, `citations`, `follow_up_questions`, `usage`.
+Upstream `POST /v1/orchestrator/answer` terminal JSON may nest `answer.text`, `meta.route`, `meta.tool`, and tool-keyed `usage` / `latency_ms` (`tool_rag`, `tool_github_search`, …). The gateway flattens these into `OrchestratorChatResponse` (`answer`, `route`, `citations`, `follow_up_questions`, `usage`).
 
 ---
 
-## `GET /api/conversations`
+## `GET /v1/conversations`
 
 ### Request headers
 
@@ -413,7 +431,7 @@ Upstream non-stream JSON (`OrchestratorChatResponse`): `answer`, `citations`, `f
 
 ---
 
-## `GET /api/conversations/{conversation_id}/messages`
+## `GET /v1/conversations/{conversation_id}/messages`
 
 ### Request headers
 

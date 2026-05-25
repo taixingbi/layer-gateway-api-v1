@@ -19,7 +19,7 @@ class Settings(BaseSettings):
     max_inflight_requests: int = 100
 
     orchestrator_base_url: str = "http://192.168.86.179:30184"
-    orchestrator_chat_path: str = "/v1/orchestrator/chat"
+    orchestrator_chat_path: str = "/v1/orchestrator/answer"
     orchestrator_feedback_path: str = "/feedback"
     orchestrator_contract: Literal["gateway_json", "flat_headers"] = "gateway_json"
     orchestrator_timeout_ms: int = 15000

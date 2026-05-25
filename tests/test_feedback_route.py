@@ -16,7 +16,7 @@ def _auth_headers():
 @patch("app.routes.feedback.feedback_persistence_enabled", return_value=True)
 @patch("app.routes.feedback.insert_message_feedback")
 def test_feedback_persists(mock_insert, _enabled):
-    """POST /api/feedback saves to Supabase and does not call orchestrator."""
+    """POST /v1/feedback saves to Supabase and does not call orchestrator."""
     cid = str(uuid.uuid4())
     mid = str(uuid.uuid4())
     mock_insert.return_value = {
@@ -32,7 +32,7 @@ def test_feedback_persists(mock_insert, _enabled):
     app.state.orchestrator_client = orch
     client = TestClient(app)
     response = client.post(
-        "/api/feedback",
+        "/v1/feedback",
         headers=_auth_headers(),
         json={
             "message_id": mid,
@@ -53,7 +53,7 @@ def test_feedback_trace_only_without_message_ids_returns_400(_enabled):
     app = create_app()
     client = TestClient(app)
     response = client.post(
-        "/api/feedback",
+        "/v1/feedback",
         headers=_auth_headers(),
         json={"trace_id": "req-123", "rating": "thumbs_up"},
     )
@@ -76,7 +76,7 @@ def test_feedback_accepts_conversation_id_header(mock_insert, _enabled):
     app = create_app()
     client = TestClient(app)
     response = client.post(
-        "/api/feedback",
+        "/v1/feedback",
         headers={**_auth_headers(), "X-Conversation-Id": cid},
         json={"message_id": mid, "rating": "thumbs_up"},
     )
@@ -90,7 +90,7 @@ def test_feedback_missing_ids_returns_400_not_422(_enabled):
     app = create_app()
     client = TestClient(app)
     response = client.post(
-        "/api/feedback",
+        "/v1/feedback",
         headers=_auth_headers(),
         json={"rating": "thumbs_up", "trace_id": "t1"},
     )
@@ -104,7 +104,7 @@ def test_feedback_requires_supabase(_enabled):
     app = create_app()
     client = TestClient(app)
     response = client.post(
-        "/api/feedback",
+        "/v1/feedback",
         headers=_auth_headers(),
         json={
             "message_id": str(uuid.uuid4()),
@@ -119,7 +119,7 @@ def test_feedback_requires_auth():
     app = create_app()
     with TestClient(app) as client:
         response = client.post(
-            "/api/feedback",
+            "/v1/feedback",
             json={
                 "message_id": str(uuid.uuid4()),
                 "conversation_id": str(uuid.uuid4()),

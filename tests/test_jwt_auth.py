@@ -147,7 +147,7 @@ def test_chat_accepts_valid_jwt(jwt_env):
         client.app.state.jwt_validator = JwtValidator(settings, jwk_client=_StaticJwkClient(py_jwk))
         client.app.state.orchestrator_client = _StubOrch()
         response = client.post(
-            "/api/chat",
+            "/v1/chat",
             headers={"Authorization": f"Bearer {token}"},
             json={"message": "hello", "metadata": {}},
         )
@@ -175,7 +175,7 @@ def test_chat_rejects_expired_jwt(jwt_env):
     with TestClient(app) as client:
         client.app.state.jwt_validator = JwtValidator(settings, jwk_client=_StaticJwkClient(py_jwk))
         response = client.post(
-            "/api/chat",
+            "/v1/chat",
             headers={"Authorization": f"Bearer {token}"},
             json={"message": "hello", "metadata": {}},
         )
@@ -192,7 +192,7 @@ def test_chat_rejects_wrong_audience_jwt(jwt_env):
     with TestClient(app) as client:
         client.app.state.jwt_validator = JwtValidator(settings, jwk_client=_StaticJwkClient(py_jwk))
         response = client.post(
-            "/api/chat",
+            "/v1/chat",
             headers={"Authorization": f"Bearer {token}"},
             json={"message": "hello", "metadata": {}},
         )

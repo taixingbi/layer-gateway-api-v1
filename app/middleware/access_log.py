@@ -47,7 +47,7 @@ def _emit_request_complete(
         "latency_ms": round(latency_ms, 3),
         "stream": stream,
         "backend": "orchestrator"
-        if request.url.path == "/api/chat" and request.method == "POST"
+        if request.url.path == "/v1/chat" and request.method == "POST"
         else "-",
     }
     if ttfb_ms is not None:

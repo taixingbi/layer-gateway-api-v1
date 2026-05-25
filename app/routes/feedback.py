@@ -13,11 +13,11 @@ from app.services.message_feedback_service import (
     insert_message_feedback,
 )
 
-router = APIRouter(prefix="/api", tags=["feedback"])
+router = APIRouter(prefix="/v1", tags=["feedback"])
 
 
 def _conversation_id_from_header(request: Request) -> str | None:
-    """``X-Conversation-Id`` fallback (same as ``POST /api/chat``)."""
+    """``X-Conversation-Id`` fallback (same as ``POST /v1/chat``)."""
     raw = (request.headers.get("x-conversation-id") or "").strip()
     return raw or None
 

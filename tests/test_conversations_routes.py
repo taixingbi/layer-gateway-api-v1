@@ -1,4 +1,4 @@
-"""Tests for GET /api/conversations and messages."""
+"""Tests for GET /v1/conversations and messages."""
 
 import uuid
 from unittest.mock import patch
@@ -15,7 +15,7 @@ def _auth_headers():
 @patch("app.deps.supabase_auth.verify_access_token")
 @patch("app.routes.conversations.list_conversations")
 def test_list_conversations(mock_list, mock_verify):
-    """GET /api/conversations returns summaries."""
+    """GET /v1/conversations returns summaries."""
     from app.services.auth_claims import UserClaims
 
     mock_verify.return_value = UserClaims(
@@ -38,7 +38,7 @@ def test_list_conversations(mock_list, mock_verify):
 
     app = create_app()
     client = TestClient(app)
-    response = client.get("/api/conversations", headers=_auth_headers())
+    response = client.get("/v1/conversations", headers=_auth_headers())
     assert response.status_code == 200
     data = response.json()
     assert len(data["conversations"]) == 1
@@ -48,7 +48,7 @@ def test_list_conversations(mock_list, mock_verify):
 @patch("app.deps.supabase_auth.verify_access_token")
 @patch("app.routes.conversations.list_messages_for_api")
 def test_conversation_messages(mock_messages, mock_verify):
-    """GET /api/conversations/{id}/messages returns stored turns."""
+    """GET /v1/conversations/{id}/messages returns stored turns."""
     from app.services.auth_claims import UserClaims
 
     mock_verify.return_value = UserClaims(
@@ -76,7 +76,7 @@ def test_conversation_messages(mock_messages, mock_verify):
     app = create_app()
     client = TestClient(app)
     response = client.get(
-        f"/api/conversations/{cid}/messages",
+        f"/v1/conversations/{cid}/messages",
         headers=_auth_headers(),
     )
     assert response.status_code == 200

@@ -115,7 +115,7 @@ def auth_latency_ms(request: Request) -> float | None:
 
 
 class ChatLatencyRecorder:
-    """Mutable per-request phase timings for ``POST /api/chat``."""
+    """Mutable per-request phase timings for ``POST /v1/chat``."""
 
     def __init__(self) -> None:
         self.request_validation_ms = 0.0

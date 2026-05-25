@@ -97,7 +97,7 @@ def test_chat_persists_on_success(
     client = TestClient(app)
 
     response = client.post(
-        "/api/chat",
+        "/v1/chat",
         headers=_auth_headers(),
         json={"message": "Hello", "conversation_id": conv_id},
     )
@@ -147,7 +147,7 @@ def test_chat_stream_persists_assistant_without_rewrite(
     client = TestClient(app)
 
     response = client.post(
-        "/api/chat",
+        "/v1/chat",
         headers={**_auth_headers(), "Accept": "text/event-stream"},
         json={"message": "how are you?", "stream": True, "conversation_id": conv_id},
     )
@@ -174,7 +174,7 @@ def test_chat_skips_persistence_when_disabled(mock_ensure, _enabled):
     client = TestClient(app)
 
     response = client.post(
-        "/api/chat",
+        "/v1/chat",
         headers=_auth_headers(),
         json={"message": "Hello"},
     )

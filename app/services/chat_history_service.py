@@ -138,10 +138,13 @@ def normalize_orchestrator_usage(source: Any) -> dict[str, Any]:
                 "total_tokens",
                 "intent_router",
                 "rag",
+                "tool_rag",
+                "tool_github_search",
+                "tool_tavily_search",
                 "input_tokens",
                 "output_tokens",
             )
-        ):
+        ) or any(isinstance(k, str) and k.startswith("tool_") for k in source):
             raw = source
         else:
             return {}
@@ -161,10 +164,12 @@ def normalize_orchestrator_usage(source: Any) -> dict[str, Any]:
 
 def orchestrator_payload_dict(source: Any) -> dict[str, Any]:
     """Normalize orchestrator result to a dict for persistence helpers."""
+    from app.services.orchestrator_normalize import normalize_orchestrator_payload
+
     if isinstance(source, dict):
-        return dict(source)
+        return normalize_orchestrator_payload(source)
     if hasattr(source, "model_dump"):
-        return source.model_dump(mode="json")
+        return normalize_orchestrator_payload(source.model_dump(mode="json"))
     out: dict[str, Any] = {}
     for key in (
         "answer",
@@ -175,11 +180,13 @@ def orchestrator_payload_dict(source: Any) -> dict[str, Any]:
         "timings_ms",
         "citations",
         "follow_up_questions",
+        "route_meta",
+        "tool_meta",
     ):
         val = getattr(source, key, None)
         if val is not None:
             out[key] = val
-    return out
+    return normalize_orchestrator_payload(out) if out else out
 
 
 def default_chat_route_label() -> str:
@@ -198,6 +205,8 @@ def assistant_message_metadata(
     follow_up_questions: list[str] | None = None,
     model: str | None = None,
     route: str | None = None,
+    route_meta: dict[str, Any] | None = None,
+    tool_meta: dict[str, Any] | None = None,
     usage: dict[str, Any] | None = None,
     latency_ms: dict[str, Any] | None = None,
     timings_ms: dict[str, Any] | None = None,
@@ -214,6 +223,10 @@ def assistant_message_metadata(
         meta["model"] = model.strip()
     route_label = (route or "").strip() or default_chat_route_label()
     meta["route"] = route_label
+    if route_meta:
+        meta["route_meta"] = route_meta
+    if tool_meta:
+        meta["tool_meta"] = tool_meta
     if usage:
         meta["usage"] = usage
     stored_latency = latency_ms or timings_ms

@@ -26,6 +26,7 @@ class ChatResponse(BaseModel):
     assistant_message_id: str | None = None
     answer: str
     rewrite: str | None = None
+    route: str | None = None
     citations: list[dict[str, Any]] = Field(default_factory=list)
     follow_up_questions: list[str] = Field(default_factory=list)
     usage: dict[str, Any] = Field(default_factory=dict)

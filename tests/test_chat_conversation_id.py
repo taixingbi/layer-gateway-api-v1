@@ -39,7 +39,7 @@ def test_stream_meta_includes_persisted_conversation_id(
     client = TestClient(app)
 
     response = client.post(
-        "/api/chat",
+        "/v1/chat",
         headers={"Authorization": "Bearer token-123", "Accept": "text/event-stream"},
         json={"message": "Hello", "stream": True},
     )

@@ -396,9 +396,12 @@ async def test_flat_headers_stream_orchestrator_rewrite_not_emitted_as_token():
         chunks = [c async for c in orchestrator.stream_chat(_payload(), _ctx(stream=True))]
 
     rewrite_chunks = [c for c in chunks if "event: rewrite" in c]
+    route_chunks = [c for c in chunks if "event: route" in c]
     token_chunks = [c for c in chunks if "event: token" in c]
     assert len(rewrite_chunks) == 1
     assert "candidate" in rewrite_chunks[0]
+    assert len(route_chunks) == 1
+    assert '"route":"rag"' in route_chunks[0] or '"route": "rag"' in route_chunks[0]
     assert len(token_chunks) == 1
     assert "H4 EAD" in token_chunks[0]
     assert "candidate" not in token_chunks[0]
@@ -585,7 +588,7 @@ async def test_gateway_json_stream_appends_done_with_metadata_from_non_stream():
     settings = Settings(
         orchestrator_retry_max_attempts=1,
         orchestrator_contract="gateway_json",
-        orchestrator_chat_path="/v1/orchestrator/chat",
+        orchestrator_chat_path="/v1/orchestrator/answer",
     )
     stream_lines = b'{"text":"Hello"}\n{"text":" world"}\n'
     json_body = {

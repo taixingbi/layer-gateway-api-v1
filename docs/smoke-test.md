@@ -41,7 +41,7 @@ Correlation IDs: send **`X-Request-Id`** / **`X-Trace-Id`** (optional); gateway 
 **Non-stream JSON**
 
 ```bash
-curl -sS -X POST "http://192.168.86.179:30185/api/chat" \
+curl -sS -X POST "http://192.168.86.179:30185/v1/chat" \
   -H "Authorization: Bearer ${ACCESS_TOKEN}" \
   -H "Content-Type: application/json" \
   -H "X-Session-Id: smoke-sess-001" \
@@ -57,7 +57,7 @@ curl -sS -X POST "http://192.168.86.179:30185/api/chat" \
 **Non-stream with history** (forwarded to orchestrator on `flat_headers` / `input.history` on `gateway_json`)
 
 ```bash
-curl -sS -X POST "http://192.168.86.179:30185/api/chat" \
+curl -sS -X POST "http://192.168.86.179:30185/v1/chat" \
   -H "Authorization: Bearer ${ACCESS_TOKEN}" \
   -H "Content-Type: application/json" \
   -d '{
@@ -75,7 +75,7 @@ Expect `200`, `status: "success"`, echoed `request_id` / `trace_id` / `session_i
 **JWKS fallback** (no Supabase): set `ACCESS_TOKEN` to a valid OIDC access token (`iss`, `aud`, `exp` must match `AUTH_JWT_*`). Invalid or expired tokens return **401**.
 
 ```bash
-curl -sS -X POST "http://192.168.86.179:30185/api/chat" \
+curl -sS -X POST "http://192.168.86.179:30185/v1/chat" \
   -H "Authorization: Bearer ${ACCESS_TOKEN}" \
   -H "Content-Type: application/json" \
   -d '{"message":"Hello","metadata":{"user_agent":"curl-jwt"}}' | jq .
@@ -84,7 +84,7 @@ curl -sS -X POST "http://192.168.86.179:30185/api/chat" \
 **SSE stream** (`Accept: text/event-stream` or JSON `"stream": true`)
 
 ```bash
-curl -N -sS -X POST "http://192.168.86.179:30185/api/chat" \
+curl -N -sS -X POST "http://192.168.86.179:30185/v1/chat" \
   -H "Authorization: Bearer ${ACCESS_TOKEN}" \
   -H "Content-Type: application/json" \
   -H "X-Session-Id: smoke-sess-002" \
@@ -99,12 +99,12 @@ Expect lines starting with `event: meta`, then optional `event: rewrite`, then o
 
 ### HuntAI web (Next BFF) — translated SSE
 
-The **Next.js** app in **layer-web-v1** exposes `POST /api/chat` on the **web** port (e.g. `http://localhost:3000`). It proxies to this gateway and **renames** SSE events for the browser (`status`, `result_chunk`, `stream_end`, …). To smoke the **full stack**, `curl -N` the **web** URL with a minimal body (`message`, optional `conversation_id` / `history`) and a session cookie from **`/login`** (or `Authorization: Bearer ${ACCESS_TOKEN}`). See **layer-web-v1** [`docs/design.md`](../../layer-web-v1/docs/design.md) (section *Verifying SSE with curl*).
+The **Next.js** app in **layer-web-v1** exposes `POST /v1/chat` on the **web** port (e.g. `http://localhost:3000`). It proxies to this gateway and **renames** SSE events for the browser (`status`, `result_chunk`, `stream_end`, …). To smoke the **full stack**, `curl -N` the **web** URL with a minimal body (`message`, optional `conversation_id` / `history`) and a session cookie from **`/login`** (or `Authorization: Bearer ${ACCESS_TOKEN}`). See **layer-web-v1** [`docs/design.md`](../../layer-web-v1/docs/design.md) (section *Verifying SSE with curl*).
 
 **Auth failure** (no `Authorization` header)
 
 ```bash
-curl -sS -o /dev/stderr -w "%{http_code}\n" -X POST "http://192.168.86.179:30185/api/chat" \
+curl -sS -o /dev/stderr -w "%{http_code}\n" -X POST "http://192.168.86.179:30185/v1/chat" \
   -H "Content-Type: application/json" \
   -d '{"message":"should fail"}'
 ```
@@ -113,7 +113,7 @@ Expect `401`.
 
 ## Feedback (Supabase `message_feedback` only; not forwarded to orchestrator)
 
-Requires **`SUPABASE_URL`** + **`SUPABASE_ANON_KEY`**. Use ids from a prior `/api/chat` response.
+Requires **`SUPABASE_URL`** + **`SUPABASE_ANON_KEY`**. Use ids from a prior `/v1/chat` response.
 
 If inserts fail with `message_feedback_feedback_type_check`, drop that CHECK in Supabase (or run step 1 of
 `sql/message_feedback_feedback_reason_constraint.sql`). **No DB constraint is required** — the gateway normalizes
@@ -125,7 +125,7 @@ Thumbs up rows have **`feedback_reason` = NULL** by design; **`created_at`** is 
 **Thumbs up**
 
 ```bash
-curl -sS -X POST "http://192.168.86.179:30185/api/feedback" \
+curl -sS -X POST "http://192.168.86.179:30185/v1/feedback" \
   -H "Authorization: Bearer ${ACCESS_TOKEN}" \
   -H "Content-Type: application/json" \
   -d '{
@@ -140,7 +140,7 @@ curl -sS -X POST "http://192.168.86.179:30185/api/feedback" \
 **Thumbs down** (`feedback_reason` = e.g. `not_factual`; `metadata.rating` = `thumbs_down`)
 
 ```bash
-curl -sS -X POST "http://192.168.86.179:30185/api/feedback" \
+curl -sS -X POST "http://192.168.86.179:30185/v1/feedback" \
   -H "Authorization: Bearer ${ACCESS_TOKEN}" \
   -H "Content-Type: application/json" \
   -d '{
@@ -161,6 +161,6 @@ curl -sS -X POST "http://192.168.86.179:30185/api/feedback" \
 | 1 | `GET /health` | `200`, `"status":"ok"` |
 | 2 | `GET /ready` | `200` if orchestrator healthy, else `503` |
 | 3 | `GET /metrics` | `200`, body contains `gateway_requests_total` |
-| 4 | `POST /api/chat` (JSON) | `200`, success payload with `latency_ms` and `usage` |
-| 5 | `POST /api/chat` with `"stream": true` in body | SSE `meta` → optional `rewrite` → `token` (…) → `done` with `latency_ms` and `usage` |
-| 6 | `POST /api/feedback` | `200` with `FeedbackResponse` when Supabase configured; else `503` |
+| 4 | `POST /v1/chat` (JSON) | `200`, success payload with `latency_ms` and `usage` |
+| 5 | `POST /v1/chat` with `"stream": true` in body | SSE `meta` → optional `rewrite` → `token` (…) → `done` with `latency_ms` and `usage` |
+| 6 | `POST /v1/feedback` | `200` with `FeedbackResponse` when Supabase configured; else `503` |

@@ -38,7 +38,7 @@ def test_eastern_json_formatter_standard_shape(formatter: EasternJsonFormatter) 
             "trace_id": "trace_demo_002",
             "session_id": "sess_123",
             "conversation_id": "conv_demo",
-            "path": "/api/chat",
+            "path": "/v1/chat",
             "method": "POST",
             "status": 200,
             "latency_ms": 12.371,

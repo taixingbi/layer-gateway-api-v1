@@ -15,6 +15,10 @@ from app.schemas.orchestrator import OrchestratorChatRequest, OrchestratorChatRe
 from app.services.chat_history_service import normalize_orchestrator_usage
 from app.services.chat_latency import orchestrator_workflow_from_source
 from app.services.orchestrator_call_context import OrchestratorCallContext
+from app.services.orchestrator_normalize import (
+    gateway_done_fields_from_normalized,
+    normalize_orchestrator_payload,
+)
 
 
 def _upstream_has_workflow_timings(payload: dict[str, Any]) -> bool:
@@ -291,7 +295,9 @@ class OrchestratorClient:
                     content_type=response.headers.get("content-type"),
                     attempt=attempt,
                 )
-                return OrchestratorChatResponse.model_validate(parsed)
+                return OrchestratorChatResponse.model_validate(
+                    normalize_orchestrator_payload(parsed)
+                )
             except httpx.TimeoutException as exc:
                 last_error = exc
                 if attempt == self._settings.orchestrator_retry_max_attempts:
@@ -390,7 +396,9 @@ class OrchestratorClient:
                     content_type=response.headers.get("content-type"),
                     attempt=attempt,
                 )
-                return OrchestratorChatResponse.model_validate(parsed)
+                return OrchestratorChatResponse.model_validate(
+                    normalize_orchestrator_payload(parsed)
+                )
             except httpx.TimeoutException as exc:
                 last_error = exc
                 if attempt == self._settings.orchestrator_retry_max_attempts:
@@ -463,6 +471,7 @@ class OrchestratorClient:
                 )
                 rewrite_acc: str | None = None
                 timings_acc: dict[str, Any] | None = None
+                stream_done_sent = False
                 async for line in response.aiter_lines():
                     if not line:
                         continue
@@ -486,28 +495,51 @@ class OrchestratorClient:
                                 rewrite_acc = text.strip()
                                 yield _format_rewrite_sse_chunk(rewrite_acc)
                             continue
-                        if kind in ("route", "request_id", "state", "done"):
+                        if kind == "route":
+                            yield _format_route_sse_chunk(parsed)
+                            continue
+                        if kind in ("answer_delta", "answer"):
+                            text = parsed.get("text")
+                            if isinstance(text, str) and text:
+                                yield f"event: token\ndata: {json.dumps({'text': text})}\n\n"
+                            continue
+                        if kind in ("request_id", "state"):
+                            continue
+                        if kind == "done":
+                            done_body = _gateway_done_payload(
+                                json.dumps(parsed),
+                                citations=[],
+                                follow_up_questions=[],
+                                rewrite=rewrite_acc,
+                                latency_ms=timings_acc,
+                            )
+                            ndjson_usage = normalize_orchestrator_usage(parsed)
+                            if ndjson_usage and not _upstream_has_usage(done_body):
+                                done_body["usage"] = ndjson_usage
+                            yield _format_done_sse_chunk(done_body)
+                            stream_done_sent = True
                             continue
                     text = parsed.get("text") or parsed.get("token") or ""
                     if text:
                         yield f"event: token\ndata: {json.dumps({'text': text})}\n\n"
-            result = await self._chat_gateway_json(payload, ctx)
-            done_body = _done_body_from_orchestrator_result(result)
-            if rewrite_acc and not done_body.get("rewrite"):
-                done_body["rewrite"] = rewrite_acc
-            if timings_acc and not _upstream_has_workflow_timings(done_body):
-                done_body["latency_ms"] = timings_acc
-            _log_orchestrator_response(
-                settings=self._settings,
-                method="POST",
-                path=path,
-                ctx=ctx,
-                stream=True,
-                status_code=200,
-                body=done_body,
-                note="stream_metadata_supplement",
-            )
-            yield _format_done_sse_chunk(done_body)
+            if not stream_done_sent:
+                result = await self._chat_gateway_json(payload, ctx)
+                done_body = _done_body_from_orchestrator_result(result)
+                if rewrite_acc and not done_body.get("rewrite"):
+                    done_body["rewrite"] = rewrite_acc
+                if timings_acc and not _upstream_has_workflow_timings(done_body):
+                    done_body["latency_ms"] = timings_acc
+                _log_orchestrator_response(
+                    settings=self._settings,
+                    method="POST",
+                    path=path,
+                    ctx=ctx,
+                    stream=True,
+                    status_code=200,
+                    body=done_body,
+                    note="stream_metadata_supplement",
+                )
+                yield _format_done_sse_chunk(done_body)
         except httpx.TimeoutException as exc:
             raise HTTPException(status_code=504, detail="Orchestrator stream timeout") from exc
 
@@ -738,6 +770,11 @@ def _format_rewrite_sse_chunk(text: str) -> str:
     return f"event: rewrite\ndata: {json.dumps({'text': text})}\n\n"
 
 
+def _format_route_sse_chunk(route_payload: dict[str, Any]) -> str:
+    """Format one gateway ``route`` SSE event (passthrough orchestrator shape)."""
+    return f"event: route\ndata: {json.dumps(route_payload)}\n\n"
+
+
 def _token_text_from_sse_data(raw: str) -> str:
     """Extract display text from upstream SSE data line."""
     if not raw.strip():
@@ -766,17 +803,15 @@ def _token_text_from_sse_data(raw: str) -> str:
 
 def _done_body_from_orchestrator_result(result: OrchestratorChatResponse) -> dict[str, Any]:
     """Build gateway done payload from non-stream orchestrator result."""
-    body: dict[str, Any] = {"status": "success"}
-    if result.rewrite:
-        body["rewrite"] = result.rewrite
-    if result.citations:
-        body["citations"] = result.citations
-    if result.follow_up_questions:
-        body["follow_up_questions"] = result.follow_up_questions
-    orch_workflow = orchestrator_workflow_from_source(result)
-    if orch_workflow:
+    raw = result.model_dump(mode="json") if hasattr(result, "model_dump") else dict(result)
+    normalized = normalize_orchestrator_payload(raw)
+    body = gateway_done_fields_from_normalized(normalized)
+    if not body.get("status"):
+        body["status"] = "success"
+    orch_workflow = orchestrator_workflow_from_source(normalized)
+    if orch_workflow and not body.get("latency_ms"):
         body["latency_ms"] = orch_workflow
-    usage = normalize_orchestrator_usage(result)
+    usage = normalize_orchestrator_usage(normalized)
     if usage:
         body["usage"] = usage
     return body
@@ -869,30 +904,52 @@ def _gateway_done_payload(
     if follow_up_questions:
         body["follow_up_questions"] = follow_up_questions
     if not raw.strip():
+        if latency_ms and not body.get("latency_ms"):
+            body["latency_ms"] = latency_ms
         return body
     try:
         parsed = json.loads(raw)
     except json.JSONDecodeError:
+        if latency_ms and not body.get("latency_ms"):
+            body["latency_ms"] = latency_ms
         return body
     if not isinstance(parsed, dict):
+        if latency_ms and not body.get("latency_ms"):
+            body["latency_ms"] = latency_ms
         return body
-    if parsed.get("status"):
-        body["status"] = parsed["status"]
-    upstream_rewrite = parsed.get("rewrite")
-    if isinstance(upstream_rewrite, str) and upstream_rewrite.strip():
-        body["rewrite"] = upstream_rewrite.strip()
-    upstream_cites = parsed.get("citations")
-    if isinstance(upstream_cites, list) and upstream_cites:
-        body["citations"] = upstream_cites
-    upstream_follow = parsed.get("follow_up_questions")
-    if isinstance(upstream_follow, list) and upstream_follow:
-        body["follow_up_questions"] = [str(q) for q in upstream_follow if q]
-    upstream_timings = orchestrator_workflow_from_source(parsed)
+
+    normalized = normalize_orchestrator_payload(parsed)
+    merged = gateway_done_fields_from_normalized(normalized)
+    if merged.get("status"):
+        body["status"] = merged["status"]
+    for key in (
+        "rewrite",
+        "citations",
+        "follow_up_questions",
+        "route",
+        "route_detail",
+        "route_source",
+        "latency_ms",
+        "usage",
+    ):
+        val = merged.get(key)
+        if val:
+            body[key] = val
+
+    if rewrite and not body.get("rewrite"):
+        body["rewrite"] = rewrite
+    if citations and not body.get("citations"):
+        body["citations"] = citations
+    if follow_up_questions and not body.get("follow_up_questions"):
+        body["follow_up_questions"] = follow_up_questions
+
+    upstream_timings = orchestrator_workflow_from_source(normalized)
     if upstream_timings:
         body["latency_ms"] = upstream_timings
-    elif latency_ms:
+    elif latency_ms and not body.get("latency_ms"):
         body["latency_ms"] = latency_ms
-    upstream_usage = normalize_orchestrator_usage(parsed)
+
+    upstream_usage = normalize_orchestrator_usage(normalized)
     if upstream_usage:
         body["usage"] = upstream_usage
     return body
@@ -936,7 +993,10 @@ async def _iter_upstream_sse_as_gateway_tokens(response: httpx.Response) -> Asyn
                     rewrite_acc = text.strip()
                     yield _format_rewrite_sse_chunk(rewrite_acc)
                 continue
-            if ndjson_type in ("route", "request_id", "state"):
+            if ndjson_type == "route" and ndjson is not None:
+                yield _format_route_sse_chunk(ndjson)
+                continue
+            if ndjson_type in ("request_id", "state"):
                 continue
             if ndjson_type == "answer" and ndjson is not None:
                 text = ndjson.get("text")

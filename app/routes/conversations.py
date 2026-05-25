@@ -16,7 +16,7 @@ from app.services.chat_history_service import (
     list_messages_for_api,
 )
 
-router = APIRouter(prefix="/api", tags=["conversations"])
+router = APIRouter(prefix="/v1", tags=["conversations"])
 
 
 @router.get("/conversations", response_model=ConversationListResponse)

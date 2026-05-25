@@ -113,7 +113,7 @@ def _upstream_token_text_is_internal_context_error(text: str) -> bool:
     return False
 
 
-router = APIRouter(prefix="/api", tags=["chat"])
+router = APIRouter(prefix="/v1", tags=["chat"])
 
 
 def _generate_session_id() -> str:
@@ -190,7 +190,7 @@ def _prepare_chat_history(request: Request, payload: ChatRequest) -> None:
     if not persistence_enabled():
         log_event(
             "chat_history_skipped",
-            path="/api/chat",
+            path="/v1/chat",
             reason="supabase_not_configured",
             **_chat_correlation_log_kwargs(request),
         )
@@ -225,7 +225,7 @@ def _prepare_chat_history(request: Request, payload: ChatRequest) -> None:
     except ChatHistoryUnavailable:
         log_event(
             "chat_history_skipped",
-            path="/api/chat",
+            path="/v1/chat",
             reason="supabase_unavailable",
             **_chat_correlation_log_kwargs(request),
         )
@@ -254,9 +254,10 @@ def _persist_assistant_message(
     latency = getattr(request.state, "chat_latency", None)
     t_db = latency.measure() if latency else None
     orch_workflow = orchestrator_workflow_from_source(done_payload)
-    route_from_done = (
-        (done_payload or {}).get("route") if isinstance(done_payload, dict) else None
-    )
+    done_dict = done_payload if isinstance(done_payload, dict) else {}
+    route_from_done = done_dict.get("route")
+    route_meta = done_dict.get("route_meta")
+    tool_meta = done_dict.get("tool_meta")
     if latency_ms is None and (orch_workflow or latency):
         latency_ms = chat_latency_recorder(request).build(
             request, orchestrator_workflow=orch_workflow
@@ -270,6 +271,8 @@ def _persist_assistant_message(
         follow_up_questions=follow_up_questions,
         model=resolve_assistant_model_name(usage=normalized_usage or usage, done_payload=done_payload),
         route=route_from_done if isinstance(route_from_done, str) else None,
+        route_meta=route_meta if isinstance(route_meta, dict) else None,
+        tool_meta=tool_meta if isinstance(tool_meta, dict) else None,
         usage=normalized_usage or None,
         latency_ms=latency_ms,
     )
@@ -362,7 +365,7 @@ async def chat(request: Request, payload: ChatRequest):
     # Record ingress event with correlation fields before processing.
     log_event(
         "request_received",
-        path="/api/chat",
+        path="/v1/chat",
         method=request.method,
         **_chat_correlation_log_kwargs(request),
     )
@@ -373,7 +376,7 @@ async def chat(request: Request, payload: ChatRequest):
     # Validation checkpoint for request observability.
     log_event(
         "request_validated",
-        path="/api/chat",
+        path="/v1/chat",
         method=request.method,
         **_chat_correlation_log_kwargs(request),
     )
@@ -429,6 +432,7 @@ async def chat(request: Request, payload: ChatRequest):
             assistant_message_id=assistant_message_id,
             answer=result.answer,
             rewrite=getattr(result, "rewrite", None),
+            route=getattr(result, "route", None),
             citations=result.citations,
             follow_up_questions=getattr(result, "follow_up_questions", None) or [],
             usage=normalize_orchestrator_usage(result),
@@ -484,6 +488,9 @@ async def _stream_response(request: Request, orchestrator_payload: OrchestratorC
             if upstream_first:
                 request.state.stream_ttfb_ms = (time.perf_counter() - ttfb_start) * 1000
                 upstream_first = False
+            if token_event.lstrip().startswith("event: route"):
+                yield token_event
+                continue
             if token_event.lstrip().startswith("event: done"):
                 upstream_done_sent = True
                 pending_done_body = _gateway_sse_chunk_done_payload(token_event) or {"status": "success"}

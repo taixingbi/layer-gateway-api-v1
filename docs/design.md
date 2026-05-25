@@ -41,7 +41,7 @@ Outermost first on the incoming request:
 
 Field-level request/response tables: **[schema.md](./schema.md)**.
 
-### Frontend -> Gateway (`POST /api/chat`)
+### Frontend -> Gateway (`POST /v1/chat`)
 Request:
 - `X-Session-Id` header (optional): session continuity; if omitted the gateway mints `sess_…` (never accept `session_id` in JSON — `extra=forbid`).
 - `conversation_id` (optional)
@@ -56,14 +56,14 @@ Headers:
 - `X-Request-Id` (optional)
 - `X-Trace-Id` (optional)
 
-### Gateway -> Orchestrator (`POST /v1/orchestrator/chat`)
+### Gateway -> Orchestrator (`POST /v1/orchestrator/answer`)
 Body sections:
 - `auth`: `user_id`, `tenant_id`, `roles`
 - `context`: `session_id`, `conversation_id`, `request_id`, `trace_id`
 - `input`: normalized `question` and optional `history`
 - `client`: source and metadata
 
-### Chat history persistence (`POST /api/chat`)
+### Chat history persistence (`POST /v1/chat`)
 
 When Supabase is configured:
 
@@ -79,8 +79,8 @@ RLS policies: run `sql/chat_history_rls.sql` in Supabase (or use `SUPABASE_SERVI
 
 ### Conversation read APIs
 
-- `GET /api/conversations` — list threads for the authenticated user (newest `updated_at` first).
-- `GET /api/conversations/{conversation_id}/messages` — full message list for one owned thread.
+- `GET /v1/conversations` — list threads for the authenticated user (newest `updated_at` first).
+- `GET /v1/conversations/{conversation_id}/messages` — full message list for one owned thread.
 
 ### Gateway -> Frontend
 Stable response:

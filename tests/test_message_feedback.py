@@ -151,7 +151,7 @@ def test_post_feedback_thumbs_up_row_shape(mock_insert, _enabled):
     app = create_app()
     client = TestClient(app)
     response = client.post(
-        "/api/feedback",
+        "/v1/feedback",
         headers=_auth_headers(),
         json={
             "message_id": mid,
@@ -179,7 +179,7 @@ def test_post_feedback_thumbs_down_with_reason(mock_insert, _enabled):
     app = create_app()
     client = TestClient(app)
     response = client.post(
-        "/api/feedback",
+        "/v1/feedback",
         headers=_auth_headers(),
         json={
             "message_id": mid,
@@ -202,7 +202,7 @@ def test_post_feedback_requires_supabase(_enabled):
     app = create_app()
     client = TestClient(app)
     response = client.post(
-        "/api/feedback",
+        "/v1/feedback",
         headers=_auth_headers(),
         json={
             "message_id": str(uuid.uuid4()),

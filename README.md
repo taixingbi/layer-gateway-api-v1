@@ -93,7 +93,7 @@ Legacy nested JSON orchestrator (default in code when unset):
 
 ```env
 ORCHESTRATOR_BASE_URL=http://192.168.86.179:30184
-ORCHESTRATOR_CHAT_PATH=/v1/orchestrator/chat
+ORCHESTRATOR_CHAT_PATH=/v1/orchestrator/answer
 ORCHESTRATOR_CONTRACT=gateway_json
 ```
 
@@ -176,7 +176,7 @@ Ready response (probe succeeded):
 
 ### Chat (non-stream)
 
-`POST /api/chat`
+`POST /v1/chat`
 
 Headers:
 - `Authorization: Bearer <token>` (required)
@@ -187,7 +187,7 @@ Headers:
 curl:
 
 ```bash
-curl -sS http://localhost:8000/api/chat \
+curl -sS http://localhost:8000/v1/chat \
   -H "Authorization: Bearer <access_token>" \
   -H "Content-Type: application/json" \
   -H "X-Session-Id: sess_123" \
@@ -250,7 +250,7 @@ Use either:
 curl:
 
 ```bash
-curl -N http://localhost:8000/api/chat \
+curl -N http://localhost:8000/v1/chat \
   -H "Authorization: Bearer <access_token>" \
   -H "Content-Type: application/json" \
   -H "Accept: text/event-stream" \
@@ -297,7 +297,7 @@ Outermost first: **request context** (`X-Request-Id` / `X-Trace-Id`) → **struc
 
 ### `request_complete` log
 
-Every finished request emits a structured log line via `python-json-logger` with fields such as: `ts`, `level`, `event` (`request_complete`), `service`, `request_id`, `trace_id`, `session_id`, `path`, `method`, `status`, `latency_ms`, optional `ttfb_ms` (first **upstream** SSE token after `meta` for `/api/chat` streams), `stream`, `backend` (`orchestrator` for `POST /api/chat`, else `-`).
+Every finished request emits a structured log line via `python-json-logger` with fields such as: `ts`, `level`, `event` (`request_complete`), `service`, `request_id`, `trace_id`, `session_id`, `path`, `method`, `status`, `latency_ms`, optional `ttfb_ms` (first **upstream** SSE token after `meta` for `/v1/chat` streams), `stream`, `backend` (`orchestrator` for `POST /v1/chat`, else `-`).
 
 ### Prometheus
 

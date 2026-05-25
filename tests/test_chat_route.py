@@ -1,4 +1,4 @@
-"""Integration tests for ``POST /api/chat`` validation and orchestrator wiring."""
+"""Integration tests for ``POST /v1/chat`` validation and orchestrator wiring."""
 
 import json
 from unittest.mock import patch
@@ -117,7 +117,7 @@ def test_chat_forwards_rewrite_from_upstream():
     with TestClient(app) as client:
         app.state.orchestrator_client = StubWithRewrite()
         response = client.post(
-            "/api/chat",
+            "/v1/chat",
             headers=_auth_headers(),
             json={"message": "visa?", "metadata": {}},
         )
@@ -131,7 +131,7 @@ def test_chat_forwards_follow_up_questions_from_upstream():
     with TestClient(app) as client:
         app.state.orchestrator_client = StubOrchestratorWithFollowUps()
         response = client.post(
-            "/api/chat",
+            "/v1/chat",
             headers=_auth_headers(),
             json={"message": "visa status?", "metadata": {}},
         )
@@ -149,7 +149,7 @@ def test_chat_returns_stable_response_contract():
     with TestClient(app) as client:
         app.state.orchestrator_client = StubOrchestratorClient()
         response = client.post(
-            "/api/chat",
+            "/v1/chat",
             headers=_auth_headers(),
             json={"message": "What is the return policy?", "metadata": {"page": "/support"}},
         )
@@ -169,7 +169,7 @@ def test_chat_uses_x_session_id_header_when_present():
     with TestClient(app) as client:
         app.state.orchestrator_client = StubOrchestratorClient()
         response = client.post(
-            "/api/chat",
+            "/v1/chat",
             headers={**_auth_headers(), "X-Session-Id": "ses-from-header-99"},
             json={"message": "What is the return policy?", "metadata": {"page": "/support"}},
         )
@@ -183,7 +183,7 @@ def test_chat_rejects_session_id_in_json_body():
     with TestClient(app) as client:
         app.state.orchestrator_client = StubOrchestratorClient()
         response = client.post(
-            "/api/chat",
+            "/v1/chat",
             headers=_auth_headers(),
             json={"session_id": "sess-from-body", "message": "Hi", "metadata": {}},
         )
@@ -205,7 +205,7 @@ def test_chat_logs_and_request_complete_include_conversation_id_when_provided():
         with TestClient(app) as client:
             app.state.orchestrator_client = StubOrchestratorClient()
             response = client.post(
-                "/api/chat",
+                "/v1/chat",
                 headers=_auth_headers(),
                 json={"message": "Hi", "metadata": {}, "conversation_id": "conv-access-log-001"},
             )
@@ -236,7 +236,7 @@ def test_chat_passes_history_to_orchestrator_client():
     with TestClient(app) as client:
         app.state.orchestrator_client = stub
         response = client.post(
-            "/api/chat",
+            "/v1/chat",
             headers=_auth_headers(),
             json={
                 "message": "what is Taixing US visa status?",
@@ -257,7 +257,7 @@ def test_chat_passes_conversation_id_to_orchestrator_client_from_json_body():
     with TestClient(app) as client:
         app.state.orchestrator_client = stub
         response = client.post(
-            "/api/chat",
+            "/v1/chat",
             headers=_auth_headers(),
             json={"message": "Hi", "metadata": {}, "conversation_id": "conv-from-json-001"},
         )
@@ -274,7 +274,7 @@ def test_chat_passes_conversation_id_from_x_conversation_id_header():
     with TestClient(app) as client:
         app.state.orchestrator_client = stub
         response = client.post(
-            "/api/chat",
+            "/v1/chat",
             headers={**_auth_headers(), "X-Conversation-Id": "conv-from-header-002"},
             json={"message": "Hi", "metadata": {}},
         )
@@ -290,7 +290,7 @@ def test_chat_x_conversation_id_header_overrides_json_body():
     with TestClient(app) as client:
         app.state.orchestrator_client = stub
         response = client.post(
-            "/api/chat",
+            "/v1/chat",
             headers={**_auth_headers(), "X-Conversation-Id": "conv-header-wins"},
             json={"message": "Hi", "metadata": {}, "conversation_id": "conv-json-ignored"},
         )
@@ -306,7 +306,7 @@ def test_chat_stream_passes_conversation_id_on_ctx():
     with TestClient(app) as client:
         app.state.orchestrator_client = stub
         response = client.post(
-            "/api/chat",
+            "/v1/chat",
             headers=_auth_headers(),
             json={"message": "s", "stream": True, "metadata": {}, "conversation_id": "conv-stream-003"},
         )
@@ -322,7 +322,7 @@ def test_chat_rejects_short_x_conversation_id():
     with TestClient(app) as client:
         app.state.orchestrator_client = StubOrchestratorClient()
         response = client.post(
-            "/api/chat",
+            "/v1/chat",
             headers={**_auth_headers(), "X-Conversation-Id": "ab"},
             json={"message": "Hi", "metadata": {}},
         )
@@ -335,7 +335,7 @@ def test_chat_rejects_short_x_session_id():
     with TestClient(app) as client:
         app.state.orchestrator_client = StubOrchestratorClient()
         response = client.post(
-            "/api/chat",
+            "/v1/chat",
             headers={**_auth_headers(), "X-Session-Id": "ab"},
             json={"message": "Hi", "metadata": {}},
         )
@@ -346,7 +346,7 @@ def test_chat_requires_auth():
     """Chat requires auth."""
     app = create_app()
     with TestClient(app) as client:
-        response = client.post("/api/chat", json={"message": "Hello"})
+        response = client.post("/v1/chat", json={"message": "Hello"})
         assert response.status_code == 401
 
 
@@ -356,7 +356,7 @@ def test_chat_validation_rejects_blank_message():
     with TestClient(app) as client:
         app.state.orchestrator_client = StubOrchestratorClient()
         response = client.post(
-            "/api/chat",
+            "/v1/chat",
             headers=_auth_headers(),
             json={"message": "   "},
         )
@@ -390,7 +390,7 @@ def test_chat_stream_preserves_citations_and_follow_ups_on_done():
     with TestClient(app) as client:
         app.state.orchestrator_client = EnrichedDoneStreamStub()
         response = client.post(
-            "/api/chat",
+            "/v1/chat",
             headers={**_auth_headers(), "Accept": "text/event-stream"},
             json={"message": "visa?", "stream": True, "metadata": {}},
         )
@@ -410,7 +410,7 @@ def test_chat_streaming_contract():
     with TestClient(app) as client:
         app.state.orchestrator_client = StubOrchestratorClient()
         response = client.post(
-            "/api/chat",
+            "/v1/chat",
             headers={**_auth_headers(), "Accept": "text/event-stream"},
             json={"message": "stream please", "conversation_id": "conv-sse-meta-001"},
         )
@@ -430,7 +430,7 @@ def test_chat_streaming_via_json_body_stream_flag():
     with TestClient(app) as client:
         app.state.orchestrator_client = StubOrchestratorClient()
         response = client.post(
-            "/api/chat",
+            "/v1/chat",
             headers=_auth_headers(),
             json={"message": "stream via body", "stream": True, "metadata": {}},
         )
@@ -462,7 +462,7 @@ def test_chat_stream_rewrites_contextvar_poison_token_to_sse_error():
     with TestClient(app) as client:
         app.state.orchestrator_client = StubOrchestratorContextErrorInStream()
         response = client.post(
-            "/api/chat",
+            "/v1/chat",
             headers=_auth_headers(),
             json={"message": "x", "stream": True, "metadata": {}},
         )
