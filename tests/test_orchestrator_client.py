@@ -583,6 +583,57 @@ async def test_flat_headers_stream_yields_tokens_before_done_supplement():
 
 
 @pytest.mark.asyncio
+async def test_flat_headers_stream_maps_json_envelope_to_token_and_done():
+    """When upstream returns ``application/json`` with stream=true, emit answer as token + done."""
+    settings = Settings(
+        orchestrator_retry_max_attempts=1,
+        orchestrator_contract="flat_headers",
+        orchestrator_chat_path="/v1/orchestrator/answer",
+    )
+    json_body = {
+        "meta": {
+            "rewrite": "hi",
+            "route": {
+                "type": "internal_intent",
+                "intent": "greeting",
+                "confidence": 0.99,
+                "source": "deterministic_rule",
+            },
+        },
+        "answer": {
+            "text": "Hello! How can I help you today?",
+            "citations": [],
+        },
+        "follow_up_questions": [],
+        "latency_ms": {"total": 0.18, "intent_router": {"total": 0.13}},
+        "usage": {"total": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}},
+        "status": {"ok": True, "state": "completed", "code": "ok"},
+    }
+
+    async def handler(request: httpx.Request):
+        body = json.loads(request.content.decode())
+        assert body.get("stream") is True
+        return httpx.Response(
+            200,
+            content=json.dumps(json_body).encode(),
+            headers={"content-type": "application/json"},
+        )
+
+    transport = httpx.MockTransport(handler)
+    async with httpx.AsyncClient(base_url="http://test", transport=transport) as client:
+        orchestrator = OrchestratorClient(client=client, settings=settings)
+        chunks = [c async for c in orchestrator.stream_chat(_payload(), _ctx(stream=True))]
+
+    token_chunks = [c for c in chunks if "event: token" in c]
+    assert len(token_chunks) == 1
+    assert "Hello! How can I help you today?" in token_chunks[0]
+    done_chunk = next(c for c in chunks if c.lstrip().startswith("event: done"))
+    done_data = json.loads([ln for ln in done_chunk.splitlines() if ln.startswith("data:")][0][5:].strip())
+    assert done_data.get("status") == "success"
+    assert done_data.get("rewrite") == "hi"
+
+
+@pytest.mark.asyncio
 async def test_gateway_json_stream_appends_done_with_metadata_from_non_stream():
     """Gateway json stream appends done with metadata from non stream."""
     settings = Settings(

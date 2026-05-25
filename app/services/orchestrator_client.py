@@ -577,6 +577,9 @@ class OrchestratorClient:
                 headers=headers,
                 json=body,
             ) as response:
+                is_json_upstream = "application/json" in (
+                    response.headers.get("content-type") or ""
+                ).lower()
                 if response.status_code >= 400:
                     _log_orchestrator_response(
                         settings=self._settings,
@@ -601,10 +604,14 @@ class OrchestratorClient:
                     content_type=response.headers.get("content-type"),
                     note="stream_opened",
                 )
-                supplement = self._flat_stream_metadata_supplement(payload, flat_ctx)
+                supplement = (
+                    None
+                    if is_json_upstream
+                    else self._flat_stream_metadata_supplement(payload, flat_ctx)
+                )
                 pending_done_chunk: str | None = None
                 streamed_chunk_count = 0
-                async for token_chunk in _iter_upstream_sse_as_gateway_tokens(response):
+                async for token_chunk in _iter_flat_upstream_as_gateway_chunks(response):
                     if token_chunk.lstrip().startswith("event: done"):
                         pending_done_chunk = token_chunk
                         continue
@@ -835,6 +842,55 @@ def _parse_done_sse_chunk(chunk: str) -> dict[str, Any] | None:
 def _format_done_sse_chunk(done_body: dict[str, Any]) -> str:
     """Format one gateway ``done`` SSE event."""
     return f"event: done\ndata: {json.dumps(done_body)}\n\n"
+
+
+async def _gateway_chunks_from_orchestrator_json(parsed: dict[str, Any]) -> AsyncGenerator[str, None]:
+    """Emit gateway SSE chunks from one orchestrator JSON envelope (non-SSE stream response)."""
+    normalized = normalize_orchestrator_payload(parsed)
+
+    rewrite = normalized.get("rewrite")
+    if isinstance(rewrite, str) and rewrite.strip():
+        yield _format_rewrite_sse_chunk(rewrite.strip())
+
+    route_evt = parsed.get("route")
+    if isinstance(route_evt, dict):
+        yield _format_route_sse_chunk(route_evt)
+
+    answer = normalized.get("answer")
+    if isinstance(answer, str) and answer:
+        yield f"event: token\ndata: {json.dumps({'text': answer})}\n\n"
+
+    done_body = gateway_done_fields_from_normalized(normalized)
+    if not done_body.get("status"):
+        done_body["status"] = "success"
+    orch_workflow = orchestrator_workflow_from_source(normalized)
+    if orch_workflow and not done_body.get("latency_ms"):
+        done_body["latency_ms"] = orch_workflow
+    usage = normalize_orchestrator_usage(normalized)
+    if usage:
+        done_body["usage"] = usage
+    yield _format_done_sse_chunk(done_body)
+
+
+async def _iter_flat_upstream_as_gateway_chunks(
+    response: httpx.Response,
+) -> AsyncGenerator[str, None]:
+    """Map flat_headers upstream body to gateway SSE (JSON envelope or SSE stream)."""
+    content_type = (response.headers.get("content-type") or "").lower()
+    if "application/json" in content_type:
+        raw = await response.aread()
+        if not raw.strip():
+            return
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError:
+            return
+        if isinstance(parsed, dict):
+            async for chunk in _gateway_chunks_from_orchestrator_json(parsed):
+                yield chunk
+        return
+    async for chunk in _iter_upstream_sse_as_gateway_tokens(response):
+        yield chunk
 
 
 async def _enrich_stream_done_chunks(
