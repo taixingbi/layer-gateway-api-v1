@@ -7,10 +7,10 @@ PUBLIC_PROBE_PATHS: frozenset[str] = frozenset({"/health", "/ready", "/metrics"}
 # Supabase auth endpoints (no bearer required).
 PUBLIC_AUTH_PATHS: frozenset[str] = frozenset(
     {
-        "/auth/signup",
-        "/auth/login",
-        "/auth/refresh",
-        "/auth/forgot-password",
-        "/auth/reset-password",
+        "/v1/auth/signup",
+        "/v1/auth/login",
+        "/v1/auth/refresh",
+        "/v1/auth/forgot-password",
+        "/v1/auth/reset-password",
     }
 )

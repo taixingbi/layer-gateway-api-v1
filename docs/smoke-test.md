@@ -5,7 +5,7 @@ Quick checks against a running gateway. Replace the host/port in each example if
 Protected routes require a valid access token. Set it once per shell session:
 
 ```bash
-# Supabase: copy access_token from POST /auth/login
+# Supabase: copy access_token from POST /v1/auth/login
 ACCESS_TOKEN="<paste access_token here>"
 
 # JWKS fallback (no Supabase): use a valid OIDC access token instead

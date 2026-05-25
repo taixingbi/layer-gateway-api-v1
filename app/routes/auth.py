@@ -8,7 +8,7 @@ from app.services import supabase_auth
 from app.services.profile_service import ProfileUpdate, update_profile
 from app.services.supabase_auth import verify_access_token
 
-router = APIRouter(tags=["auth"])
+router = APIRouter(prefix="/v1", tags=["auth"])
 
 
 class AuthBody(BaseModel):
