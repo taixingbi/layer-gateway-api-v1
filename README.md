@@ -287,7 +287,11 @@ event: done
 data: {"status":"success","citations":[{"cite_id":1,"source":"profile","text":"..."}],"follow_up_questions":["Follow-up question 1?"]}
 ```
 
-With `ORCHESTRATOR_CONTRACT=flat_headers`, outbound orchestrator JSON omits `"stream": true` (orchestrator defaults to streaming). The gateway sends `"stream": false` only for non-stream supplement / JSON chat paths. The gateway aggregates upstream RAG events (`citations`, `follow_up_questions`) into the terminal `done` payload when upstream sends them on separate SSE lines before `done`. If the upstream stream only returns tokens and an empty `done` (but non-stream JSON includes citations / follow-ups), the gateway performs one supplemental non-stream upstream call at the end of the stream to fill `done` metadata.
+With `ORCHESTRATOR_CONTRACT=flat_headers`, outbound orchestrator JSON omits `"stream": true` (orchestrator defaults to streaming). The gateway sends `"stream": false` only when the client chose **non-stream JSON** (`POST /v1/chat` without SSE).
+
+**Production streaming rule:** if upstream returns a **terminal JSON envelope** (`answer`, `meta`, `status`), the gateway maps it once to `rewrite` / `token` / `done` and **does not** run the extra non-stream supplement call (no second orchestrator POST, no `"stream": false` in logs for that turn). Supplement remains only for **true SSE** streams whose terminal `done` is missing `usage` / `latency_ms` / `citations` / `follow_up_questions` keys (typical RAG). `stream_closed` logs include `used_json_envelope` and `metadata_supplement`.
+
+The gateway aggregates upstream RAG events (`citations`, `follow_up_questions`) into the terminal `done` payload when upstream sends them on separate SSE lines before `done`. If the upstream stream only returns tokens and an empty `done` (but non-stream JSON includes citations / follow-ups), the gateway performs one supplemental non-stream upstream call at the end of the stream to fill `done` metadata.
 
 ## Observability and limits
 

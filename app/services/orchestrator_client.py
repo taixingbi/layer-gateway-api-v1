@@ -582,9 +582,6 @@ class OrchestratorClient:
                 headers=headers,
                 json=body,
             ) as response:
-                is_json_upstream = "application/json" in (
-                    response.headers.get("content-type") or ""
-                ).lower()
                 if response.status_code >= 400:
                     _log_orchestrator_response(
                         settings=self._settings,
@@ -609,14 +606,15 @@ class OrchestratorClient:
                     content_type=response.headers.get("content-type"),
                     note="stream_opened",
                 )
+                chunk_gen, used_json_envelope = await _map_flat_upstream_response(response)
                 supplement = (
                     None
-                    if is_json_upstream
+                    if used_json_envelope
                     else self._flat_stream_metadata_supplement(payload, flat_ctx)
                 )
                 pending_done_chunk: str | None = None
                 streamed_chunk_count = 0
-                async for token_chunk in _iter_flat_upstream_as_gateway_chunks(response):
+                async for token_chunk in chunk_gen:
                     if token_chunk.lstrip().startswith("event: done"):
                         pending_done_chunk = token_chunk
                         continue
@@ -638,6 +636,8 @@ class OrchestratorClient:
                     body={
                         "gateway_chunk_count": streamed_chunk_count + 1,
                         "streamed_before_done": streamed_chunk_count,
+                        "used_json_envelope": used_json_envelope,
+                        "metadata_supplement": supplement is not None,
                         "done": done_summary,
                     },
                     note="stream_closed",
@@ -877,25 +877,85 @@ async def _gateway_chunks_from_orchestrator_json(parsed: dict[str, Any]) -> Asyn
     yield _format_done_sse_chunk(done_body)
 
 
-async def _iter_flat_upstream_as_gateway_chunks(
+async def _map_flat_upstream_response(
     response: httpx.Response,
-) -> AsyncGenerator[str, None]:
-    """Map flat_headers upstream body to gateway SSE (JSON envelope or SSE stream)."""
+) -> tuple[AsyncGenerator[str, None], bool]:
+    """Return gateway chunk generator and whether upstream was a terminal JSON envelope.
+
+    Production rule: JSON envelope → map to token/done once; caller must not run supplement.
+    """
     content_type = (response.headers.get("content-type") or "").lower()
-    if "application/json" in content_type:
-        raw = await response.aread()
-        if not raw.strip():
-            return
-        try:
-            parsed = json.loads(raw)
-        except json.JSONDecodeError:
-            return
-        if isinstance(parsed, dict):
+    prefer_streaming_sse = "text/event-stream" in content_type and "application/json" not in content_type
+
+    if prefer_streaming_sse:
+
+        async def _sse_gen() -> AsyncGenerator[str, None]:
+            async for chunk in _iter_upstream_sse_as_gateway_tokens(response):
+                yield chunk
+
+        return _sse_gen(), False
+
+    raw = await response.aread()
+    if not raw.strip():
+
+        async def _empty() -> AsyncGenerator[str, None]:
+            if False:
+                yield ""
+
+        return _empty(), False
+
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        parsed = None
+
+    if isinstance(parsed, dict) and _looks_like_orchestrator_json_envelope(parsed):
+
+        async def _json_gen() -> AsyncGenerator[str, None]:
             async for chunk in _gateway_chunks_from_orchestrator_json(parsed):
                 yield chunk
+
+        return _json_gen(), True
+
+    log_event(
+        "flat_upstream_body_unrecognized",
+        level="WARN",
+        content_type=content_type,
+        body_preview=raw[:512].decode(errors="replace"),
+    )
+
+    async def _empty_gen() -> AsyncGenerator[str, None]:
         return
-    async for chunk in _iter_upstream_sse_as_gateway_tokens(response):
-        yield chunk
+        yield ""  # pragma: no cover — async generator marker
+
+    return _empty_gen(), False
+
+
+def _looks_like_orchestrator_json_envelope(parsed: Any) -> bool:
+    """True when parsed JSON is a terminal orchestrator answer envelope (not an SSE line)."""
+    if not isinstance(parsed, dict):
+        return False
+    if isinstance(parsed.get("answer"), (dict, str)):
+        return True
+    if isinstance(parsed.get("meta"), dict):
+        return True
+    status = parsed.get("status")
+    if isinstance(status, dict) and ("ok" in status or "state" in status):
+        return True
+    return False
+
+
+def _stream_done_metadata_incomplete(done_body: dict[str, Any]) -> bool:
+    """True only when ``done`` is missing fields a non-stream replay could fill (not empty lists)."""
+    if not _upstream_has_usage(done_body):
+        return True
+    if not _upstream_has_workflow_timings(done_body):
+        return True
+    if "citations" not in done_body:
+        return True
+    if "follow_up_questions" not in done_body:
+        return True
+    return False
 
 
 async def _enrich_stream_done_chunks(
@@ -918,12 +978,7 @@ async def _enrich_stream_done_chunks(
     elif supplement is None:
         return chunks
 
-    needs_supplement = supplement is not None and (
-        not done_body.get("citations")
-        or not done_body.get("follow_up_questions")
-        or not _upstream_has_workflow_timings(done_body)
-        or not _upstream_has_usage(done_body)
-    )
+    needs_supplement = supplement is not None and _stream_done_metadata_incomplete(done_body)
     if needs_supplement:
         try:
             s_cites, s_follows, s_timings, s_usage = await supplement()

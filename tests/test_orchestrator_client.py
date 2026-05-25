@@ -17,7 +17,11 @@ from app.schemas.orchestrator import (
     OrchestratorInput,
 )
 from app.services.orchestrator_call_context import OrchestratorCallContext
-from app.services.orchestrator_client import OrchestratorClient, _gateway_done_payload
+from app.services.orchestrator_client import (
+    OrchestratorClient,
+    _format_done_sse_chunk,
+    _gateway_done_payload,
+)
 
 
 def test_gateway_done_payload_includes_usage():
@@ -580,6 +584,67 @@ async def test_flat_headers_stream_yields_tokens_before_done_supplement():
         await task
 
     assert received[-1].lstrip().startswith("event: done")
+
+
+@pytest.mark.asyncio
+async def test_flat_headers_stream_json_envelope_does_not_call_supplement():
+    """Terminal JSON envelope → one orchestrator POST; no second ``stream: false`` supplement."""
+    settings = Settings(
+        orchestrator_retry_max_attempts=1,
+        orchestrator_contract="flat_headers",
+        orchestrator_chat_path="/v1/orchestrator/answer",
+    )
+    json_body = {
+        "meta": {"rewrite": "hello"},
+        "answer": {"text": "Hello!", "citations": []},
+        "follow_up_questions": [],
+        "latency_ms": {"total": 1.0},
+        "usage": {"total": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}},
+        "status": {"ok": True},
+    }
+    post_count = 0
+
+    async def handler(request: httpx.Request):
+        nonlocal post_count
+        post_count += 1
+        return httpx.Response(
+            200,
+            content=json.dumps(json_body).encode(),
+            headers={"content-type": "application/json"},
+        )
+
+    transport = httpx.MockTransport(handler)
+    async with httpx.AsyncClient(base_url="http://test", transport=transport) as client:
+        orchestrator = OrchestratorClient(client=client, settings=settings)
+        chunks = [c async for c in orchestrator.stream_chat(_payload(), _ctx(stream=True))]
+
+    assert post_count == 1
+    assert any("event: token" in c for c in chunks)
+    assert any(c.lstrip().startswith("event: done") for c in chunks)
+
+
+@pytest.mark.asyncio
+async def test_enrich_skips_supplement_when_done_has_empty_citation_lists():
+    """Empty ``citations`` / ``follow_up_questions`` arrays are valid; do not trigger replay."""
+    from app.services.orchestrator_client import _enrich_stream_done_chunks
+
+    done = _format_done_sse_chunk(
+        {
+            "status": "success",
+            "citations": [],
+            "follow_up_questions": [],
+            "usage": {"total_tokens": 1},
+            "latency_ms": {"total": 10.0},
+        }
+    )
+
+    async def _should_not_run():
+        raise AssertionError("supplement must not run")
+
+    out = await _enrich_stream_done_chunks([done], _should_not_run)
+    done_data = json.loads([ln for ln in out[0].splitlines() if ln.startswith("data:")][0][5:].strip())
+    assert done_data["citations"] == []
+    assert done_data["follow_up_questions"] == []
 
 
 @pytest.mark.asyncio

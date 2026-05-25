@@ -71,12 +71,14 @@ def gateway_done_fields_from_normalized(normalized: dict[str, Any]) -> dict[str,
         body["rewrite"] = rewrite.strip()
 
     citations = normalized.get("citations")
-    if isinstance(citations, list) and citations:
-        body["citations"] = citations
+    if isinstance(citations, list):
+        body["citations"] = [c for c in citations if isinstance(c, dict)]
 
     follow = normalized.get("follow_up_questions")
-    if isinstance(follow, list) and follow:
-        body["follow_up_questions"] = [str(q) for q in follow if q]
+    if isinstance(follow, list):
+        body["follow_up_questions"] = [
+            str(q).strip() for q in follow if isinstance(q, str) and str(q).strip()
+        ]
 
     route = normalized.get("route")
     if isinstance(route, str) and route.strip():
