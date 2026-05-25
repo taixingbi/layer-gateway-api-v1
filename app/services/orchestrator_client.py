@@ -898,15 +898,10 @@ async def _gateway_chunks_from_orchestrator_json(parsed: dict[str, Any]) -> Asyn
     yield _format_done_sse_chunk(done_body)
 
 
-async def _map_flat_upstream_response(
+async def _map_buffered_flat_upstream(
     response: httpx.Response,
 ) -> tuple[AsyncGenerator[str, None], bool]:
-    """Return gateway chunk generator and whether upstream was a terminal JSON envelope.
-
-    Always buffers the upstream body: orchestrator often returns a terminal JSON envelope
-    while labeling ``Content-Type: text/event-stream``. JSON is detected first so we do not
-    run the non-stream supplement replay (``"stream": false``).
-    """
+    """Buffer full upstream body (``application/json`` or unknown content-type)."""
     content_type = (response.headers.get("content-type") or "").lower()
     raw = await response.aread()
     if not raw.strip():
@@ -949,6 +944,64 @@ async def _map_flat_upstream_response(
         yield ""  # pragma: no cover — async generator marker
 
     return _empty_gen(), False
+
+
+async def _map_live_flat_upstream_sse(
+    response: httpx.Response,
+) -> tuple[AsyncGenerator[str, None], bool]:
+    """Passthrough orchestrator SSE so gateway tokens reach the browser as they arrive.
+
+    Sniffs initial lines for a raw JSON envelope (orchestrator sometimes labels JSON as SSE).
+    """
+    buffered_lines: list[str] = []
+    line_iter = response.aiter_lines()
+    async for line in line_iter:
+        buffered_lines.append(line)
+        probe = "\n".join(buffered_lines).strip()
+        if not probe:
+            continue
+        if probe.startswith("data:") or probe.startswith("event:") or probe.startswith(":"):
+            break
+        if "\ndata:" in probe or "\nevent:" in probe:
+            break
+        if probe.startswith("{"):
+            try:
+                parsed = json.loads(probe)
+            except json.JSONDecodeError:
+                if len(buffered_lines) > 500:
+                    break
+                continue
+            if isinstance(parsed, dict) and _looks_like_orchestrator_json_envelope(parsed):
+
+                async def _json_gen() -> AsyncGenerator[str, None]:
+                    async for out in _gateway_chunks_from_orchestrator_json(parsed):
+                        yield out
+
+                return _json_gen(), True
+
+    async def _all_lines():
+        for ln in buffered_lines:
+            yield ln
+        async for ln in line_iter:
+            yield ln
+
+    async def _live_sse() -> AsyncGenerator[str, None]:
+        async for out in _iter_upstream_sse_lines(_all_lines()):
+            yield out
+
+    return _live_sse(), False
+
+
+async def _map_flat_upstream_response(
+    response: httpx.Response,
+) -> tuple[AsyncGenerator[str, None], bool]:
+    """Return gateway chunk generator and whether upstream was a terminal JSON envelope."""
+    content_type = (response.headers.get("content-type") or "").lower()
+    if "application/json" in content_type and "text/event-stream" not in content_type:
+        return await _map_buffered_flat_upstream(response)
+    if "text/event-stream" in content_type or not content_type:
+        return await _map_live_flat_upstream_sse(response)
+    return await _map_buffered_flat_upstream(response)
 
 
 async def _lines_from_bytes(raw: bytes):

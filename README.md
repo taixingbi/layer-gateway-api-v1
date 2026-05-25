@@ -289,7 +289,7 @@ data: {"status":"success","citations":[{"cite_id":1,"source":"profile","text":".
 
 With `ORCHESTRATOR_CONTRACT=flat_headers`, outbound orchestrator JSON omits `"stream": true` (orchestrator defaults to streaming). The gateway sends `"stream": false` only when the client chose **non-stream JSON** (`POST /v1/chat` without SSE).
 
-**Production streaming rule:** one orchestrator POST per user turn in normal chat. Terminal **JSON envelopes** are mapped once to `rewrite` / `token` / `done` (`used_json_envelope: true`). For **SSE** that already emitted answer chunks (rewrite/token), the gateway **does not** replay with `"stream": false` — see `note: flat_stream_metadata_supplement` only when `streamed_before_done` is 0. `stream_closed` logs include `used_json_envelope`, `metadata_supplement`, and `metadata_supplement_skipped`.
+**Production streaming rule:** one orchestrator POST per user turn in normal chat. Upstream **SSE** (`text/event-stream`) is forwarded **live** to the browser (not buffered with `aread()`). Terminal **JSON envelopes** (`application/json` or raw JSON mislabeled as SSE) are mapped once to `rewrite` / `token` / `done` (`used_json_envelope: true`). For **SSE** that already emitted answer chunks, the gateway **does not** replay with `"stream": false`. `stream_closed` logs include `used_json_envelope`, `metadata_supplement`, and `metadata_supplement_skipped`.
 
 The gateway aggregates upstream RAG events (`citations`, `follow_up_questions`) into the terminal `done` when upstream sends them on separate SSE lines before `done`. A supplemental non-stream call runs only when the stream ended with **no** answer chunks and `done` still lacks metadata keys.
 
