@@ -1,6 +1,5 @@
 """OrchestratorClient HTTP mapping, retries, and flat_headers contract."""
 
-import asyncio
 import json
 
 import httpx
@@ -331,29 +330,22 @@ async def test_flat_headers_stream_rag_events_aggregate_into_gateway_done():
         b"event: follow_up_questions\ndata: "
         + json.dumps({"items": ["Q1?", "Q2?"]}).encode()
         + b"\n\n"
+        b'event: timings\ndata: {"latency_ms": {"total": 250.0}}\n\n'
         b"event: done\ndata: {}\n\n"
     )
+    post_count = 0
 
     async def handler(request: httpx.Request):
-        """Handler."""
-        body = json.loads(request.content.decode())
-        if body.get("stream", True):
-            return httpx.Response(200, content=sse, headers={"content-type": "text/event-stream"})
-        return httpx.Response(
-            200,
-            json={
-                "answer": "Hello world",
-                "citations": [cite],
-                "follow_up_questions": ["Q1?", "Q2?"],
-                "latency_ms": {"total": 250.0},
-            },
-        )
+        nonlocal post_count
+        post_count += 1
+        return httpx.Response(200, content=sse, headers={"content-type": "text/event-stream"})
 
     transport = httpx.MockTransport(handler)
     async with httpx.AsyncClient(base_url="http://test", transport=transport) as client:
         orchestrator = OrchestratorClient(client=client, settings=settings)
         chunks = [c async for c in orchestrator.stream_chat(_payload(), _ctx(stream=True))]
 
+    assert post_count == 1
     token_chunks = [c for c in chunks if "event: token" in c]
     assert len(token_chunks) == 2
     done_chunk = next(c for c in chunks if c.lstrip().startswith("event: done"))
@@ -445,8 +437,8 @@ async def test_chat_flat_non_stream_passes_rewrite():
 
 
 @pytest.mark.asyncio
-async def test_flat_headers_stream_supplements_timings_when_sse_done_has_citations_only():
-    """Stream may include citations on ``done`` but omit ``latency_ms``; gateway fills from non-stream JSON."""
+async def test_flat_headers_stream_does_not_supplement_when_tokens_already_streamed():
+    """After rewrite/token chunks, gateway must not replay orchestrator with ``stream: false``."""
     settings = Settings(
         orchestrator_retry_max_attempts=1,
         orchestrator_contract="flat_headers",
@@ -456,52 +448,36 @@ async def test_flat_headers_stream_supplements_timings_when_sse_done_has_citatio
     stream_sse = (
         b'event: rewrite\ndata: {"text":"visa?"}\n\n'
         b'event: token\ndata: {"text":"H4 EAD."}\n\n'
-        + f"event: done\ndata: {json.dumps({'status': 'success', 'citations': [cite], 'follow_up_questions': ['Q?']})}\n\n".encode()
+        + f"event: done\ndata: {json.dumps({'status': 'success', 'citations': [cite], 'follow_up_questions': ['Q?'], 'latency_ms': {'total': 3632.46}})}\n\n".encode()
     )
-    json_body = {
-        "answer": "H4 EAD.",
-        "rewrite": "visa?",
-        "citations": [cite],
-        "follow_up_questions": ["Q?"],
-        "latency_ms": {"total": 3632.46, "rag": {"total": 2367.0}},
-        "usage": {
-            "prompt_tokens": 100,
-            "completion_tokens": 50,
-            "total_tokens": 150,
-            "intent_router": {"prompt_tokens": 40, "completion_tokens": 10, "total_tokens": 50},
-        },
-    }
+    post_count = 0
 
     async def handler(request: httpx.Request):
-        body = json.loads(request.content.decode())
-        if body.get("stream", True):
-            return httpx.Response(200, content=stream_sse, headers={"content-type": "text/event-stream"})
-        return httpx.Response(200, json=json_body)
+        nonlocal post_count
+        post_count += 1
+        return httpx.Response(200, content=stream_sse, headers={"content-type": "text/event-stream"})
 
     transport = httpx.MockTransport(handler)
     async with httpx.AsyncClient(base_url="http://test", transport=transport) as client:
         orchestrator = OrchestratorClient(client=client, settings=settings)
         chunks = [c async for c in orchestrator.stream_chat(_payload(), _ctx(stream=True))]
 
+    assert post_count == 1
     done_chunk = next(c for c in chunks if c.lstrip().startswith("event: done"))
     done_data = json.loads([ln for ln in done_chunk.splitlines() if ln.startswith("data:")][0][5:].strip())
     assert done_data["citations"] == [cite]
     assert done_data["latency_ms"]["total"] == 3632.46
-    assert done_data["usage"]["prompt_tokens"] == 100
-    assert done_data["usage"]["input_tokens"] == 100
 
 
 @pytest.mark.asyncio
-async def test_flat_headers_stream_supplements_metadata_when_sse_lacks_citations():
-    """Some upstreams stream tokens + empty ``done`` but return citations on non-stream JSON."""
+async def test_flat_headers_stream_supplements_metadata_when_sse_has_no_tokens():
+    """Non-stream supplement only when upstream SSE emitted no answer chunks (metadata-only replay)."""
     settings = Settings(
         orchestrator_retry_max_attempts=1,
         orchestrator_contract="flat_headers",
         orchestrator_chat_path="/v1/rag/query",
     )
-    stream_sse = (
-        b'event: answer_delta\ndata: {"text":"Answer"}\n\n' b"event: done\ndata: {}\n\n"
-    )
+    stream_sse = b"event: done\ndata: {}\n\n"
     json_body = {
         "answer": "Answer",
         "citations": [{"cite_id": 1, "source": "profile"}],
@@ -509,9 +485,11 @@ async def test_flat_headers_stream_supplements_metadata_when_sse_lacks_citations
         "latency_ms": {"total": 500.0},
         "usage": {"prompt_tokens": 20, "completion_tokens": 10, "total_tokens": 30},
     }
+    post_count = 0
 
     async def handler(request: httpx.Request):
-        """Handler."""
+        nonlocal post_count
+        post_count += 1
         body = json.loads(request.content.decode())
         if body.get("stream", True):
             return httpx.Response(200, content=stream_sse, headers={"content-type": "text/event-stream"})
@@ -522,6 +500,7 @@ async def test_flat_headers_stream_supplements_metadata_when_sse_lacks_citations
         orchestrator = OrchestratorClient(client=client, settings=settings)
         chunks = [c async for c in orchestrator.stream_chat(_payload(), _ctx(stream=True))]
 
+    assert post_count == 2
     done_chunk = next(c for c in chunks if c.lstrip().startswith("event: done"))
     done_data = json.loads([ln for ln in done_chunk.splitlines() if ln.startswith("data:")][0][5:].strip())
     assert done_data["citations"] == [{"cite_id": 1, "source": "profile"}]
@@ -531,8 +510,8 @@ async def test_flat_headers_stream_supplements_metadata_when_sse_lacks_citations
 
 
 @pytest.mark.asyncio
-async def test_flat_headers_stream_yields_tokens_before_done_supplement():
-    """flat_headers must forward rewrite/token chunks before the non-stream supplement finishes."""
+async def test_flat_headers_stream_yields_tokens_before_done_without_supplement():
+    """flat_headers forwards rewrite/token chunks immediately; no second orchestrator POST."""
     settings = Settings(
         orchestrator_retry_max_attempts=1,
         orchestrator_contract="flat_headers",
@@ -543,46 +522,25 @@ async def test_flat_headers_stream_yields_tokens_before_done_supplement():
         b'event: answer_delta\ndata: {"text":"llo"}\n\n'
         b"event: done\ndata: {}\n\n"
     )
-    supplement_ready = asyncio.Event()
-    supplement_release = asyncio.Event()
+    post_count = 0
 
     async def handler(request: httpx.Request):
-        body = json.loads(request.content.decode())
-        if body.get("stream", True):
-            return httpx.Response(200, content=stream_sse, headers={"content-type": "text/event-stream"})
-        supplement_ready.set()
-        await supplement_release.wait()
-        return httpx.Response(
-            200,
-            json={
-                "answer": "Hi",
-                "citations": [],
-                "follow_up_questions": [],
-                "latency_ms": {"total": 1.0},
-                "usage": {},
-            },
-        )
+        nonlocal post_count
+        post_count += 1
+        return httpx.Response(200, content=stream_sse, headers={"content-type": "text/event-stream"})
 
     received: list[str] = []
 
     transport = httpx.MockTransport(handler)
     async with httpx.AsyncClient(base_url="http://test", transport=transport) as client:
         orchestrator = OrchestratorClient(client=client, settings=settings)
+        async for chunk in orchestrator.stream_chat(_payload(), _ctx(stream=True)):
+            received.append(chunk)
 
-        async def consume() -> None:
-            async for chunk in orchestrator.stream_chat(_payload(), _ctx(stream=True)):
-                received.append(chunk)
-
-        task = asyncio.create_task(consume())
-        await asyncio.wait_for(supplement_ready.wait(), timeout=2.0)
-        await asyncio.sleep(0)
-        pre_done = [c for c in received if not c.lstrip().startswith("event: done")]
-        assert len(pre_done) >= 2
-        assert all("event: token" in c for c in pre_done)
-        assert not any(c.lstrip().startswith("event: done") for c in received)
-        supplement_release.set()
-        await task
-
+    assert post_count == 1
+    pre_done = [c for c in received if not c.lstrip().startswith("event: done")]
+    assert len(pre_done) >= 2
+    assert all("event: token" in c for c in pre_done)
     assert received[-1].lstrip().startswith("event: done")
 
 

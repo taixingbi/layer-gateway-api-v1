@@ -634,9 +634,12 @@ class OrchestratorClient:
                         continue
                     streamed_chunk_count += 1
                     yield token_chunk
+                supplement_ran_holder: list[bool] = [False]
                 enriched_done = await _enrich_stream_done_chunks(
                     [pending_done_chunk] if pending_done_chunk else [],
                     supplement,
+                    streamed_before_done=streamed_chunk_count,
+                    supplement_ran_out=supplement_ran_holder,
                 )
                 done_chunk = enriched_done[-1] if enriched_done else _format_done_sse_chunk({"status": "success"})
                 done_summary = _parse_done_sse_chunk(done_chunk)
@@ -651,7 +654,9 @@ class OrchestratorClient:
                         "gateway_chunk_count": streamed_chunk_count + 1,
                         "streamed_before_done": streamed_chunk_count,
                         "used_json_envelope": used_json_envelope,
-                        "metadata_supplement": supplement is not None,
+                        "metadata_supplement": supplement_ran_holder[0],
+                        "metadata_supplement_skipped": supplement is not None
+                        and not supplement_ran_holder[0],
                         "done": done_summary,
                     },
                     note="stream_closed",
@@ -985,6 +990,9 @@ async def _enrich_stream_done_chunks(
         [], Awaitable[tuple[list[dict[str, Any]], list[str], dict[str, Any] | None, dict[str, Any]]]
     ]
     | None,
+    *,
+    streamed_before_done: int = 0,
+    supplement_ran_out: list[bool] | None = None,
 ) -> list[str]:
     """Ensure terminal ``done`` includes citations, follow-ups, timings, and usage (supplement when missing)."""
     done_idx = -1
@@ -999,7 +1007,16 @@ async def _enrich_stream_done_chunks(
     elif supplement is None:
         return chunks
 
-    needs_supplement = supplement is not None and _stream_done_metadata_incomplete(done_body)
+    if "citations" not in done_body:
+        done_body["citations"] = []
+    if "follow_up_questions" not in done_body:
+        done_body["follow_up_questions"] = []
+
+    # Answer already streamed (typical greeting / direct_reply SSE): do not replay orchestrator with stream=false.
+    skip_supplement = streamed_before_done > 0
+    needs_supplement = (
+        supplement is not None and not skip_supplement and _stream_done_metadata_incomplete(done_body)
+    )
     if needs_supplement:
         try:
             s_cites, s_follows, s_timings, s_usage = await supplement()
@@ -1015,6 +1032,8 @@ async def _enrich_stream_done_chunks(
             raise
         except Exception as exc:
             log_event("stream_metadata_supplement_failed", level="WARN", error=str(exc))
+        if supplement_ran_out is not None:
+            supplement_ran_out[0] = True
 
     enriched = _format_done_sse_chunk(done_body)
     if done_idx >= 0:
