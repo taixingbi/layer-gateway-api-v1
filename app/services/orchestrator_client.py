@@ -106,7 +106,13 @@ def _log_orchestrator_request(
         "orchestrator_contract": settings.orchestrator_contract,
     }
     if body is not None:
-        gateway_meta["orchestrator_api_request"] = _payload_for_log(body)
+        logged_body = _payload_for_log(body)
+        gateway_meta["orchestrator_api_request"] = logged_body
+        if isinstance(logged_body, dict):
+            if logged_body.get("stream") is False:
+                gateway_meta["orchestrator_stream_field"] = "false"
+            elif "stream" not in logged_body:
+                gateway_meta["orchestrator_stream_field"] = "omitted_default_true"
     if headers:
         gateway_meta["orchestrator_api_request_headers"] = dict(headers)
     if stream:
@@ -316,7 +322,13 @@ class OrchestratorClient:
 
         raise HTTPException(status_code=502, detail=f"Orchestrator error: {last_error}")
 
-    async def _chat_flat(self, payload: OrchestratorChatRequest, ctx: OrchestratorCallContext) -> OrchestratorChatResponse:
+    async def _chat_flat(
+        self,
+        payload: OrchestratorChatRequest,
+        ctx: OrchestratorCallContext,
+        *,
+        log_note: str | None = None,
+    ) -> OrchestratorChatResponse:
         """POST flat headers + JSON body with retries."""
         flat_ctx = OrchestratorCallContext(
             session_id=ctx.session_id,
@@ -344,6 +356,7 @@ class OrchestratorClient:
                     headers=headers,
                     body=body,
                     attempt=attempt,
+                    note=log_note or "non_stream_chat",
                 )
                 response = await self._client.post(path, headers=headers, json=body)
                 if response.status_code == status.HTTP_400_BAD_REQUEST:
@@ -575,6 +588,7 @@ class OrchestratorClient:
                 stream=True,
                 headers=headers,
                 body=body,
+                note="flat_stream_primary",
             )
             async with self._client.stream(
                 "POST",
@@ -666,7 +680,9 @@ class OrchestratorClient:
                 stream=False,
                 conversation_id=stream_ctx.conversation_id,
             )
-            result = await self._chat_flat(payload, non_stream_ctx)
+            result = await self._chat_flat(
+                payload, non_stream_ctx, log_note="flat_stream_metadata_supplement"
+            )
             cites = [c for c in (result.citations or []) if isinstance(c, dict)]
             follow_ups = [
                 str(q).strip()
@@ -882,19 +898,11 @@ async def _map_flat_upstream_response(
 ) -> tuple[AsyncGenerator[str, None], bool]:
     """Return gateway chunk generator and whether upstream was a terminal JSON envelope.
 
-    Production rule: JSON envelope → map to token/done once; caller must not run supplement.
+    Always buffers the upstream body: orchestrator often returns a terminal JSON envelope
+    while labeling ``Content-Type: text/event-stream``. JSON is detected first so we do not
+    run the non-stream supplement replay (``"stream": false``).
     """
     content_type = (response.headers.get("content-type") or "").lower()
-    prefer_streaming_sse = "text/event-stream" in content_type and "application/json" not in content_type
-
-    if prefer_streaming_sse:
-
-        async def _sse_gen() -> AsyncGenerator[str, None]:
-            async for chunk in _iter_upstream_sse_as_gateway_tokens(response):
-                yield chunk
-
-        return _sse_gen(), False
-
     raw = await response.aread()
     if not raw.strip():
 
@@ -917,6 +925,13 @@ async def _map_flat_upstream_response(
 
         return _json_gen(), True
 
+    async def _sse_gen() -> AsyncGenerator[str, None]:
+        async for chunk in _iter_upstream_sse_lines(_lines_from_bytes(raw)):
+            yield chunk
+
+    if not content_type or "text/event-stream" in content_type:
+        return _sse_gen(), False
+
     log_event(
         "flat_upstream_body_unrecognized",
         level="WARN",
@@ -929,6 +944,12 @@ async def _map_flat_upstream_response(
         yield ""  # pragma: no cover — async generator marker
 
     return _empty_gen(), False
+
+
+async def _lines_from_bytes(raw: bytes):
+    """Yield lines from a buffered upstream body."""
+    for line in raw.decode(errors="replace").splitlines():
+        yield line
 
 
 def _looks_like_orchestrator_json_envelope(parsed: Any) -> bool:
@@ -1073,13 +1094,21 @@ def _gateway_done_payload(
 
 async def _iter_upstream_sse_as_gateway_tokens(response: httpx.Response) -> AsyncGenerator[str, None]:
     """Map upstream RAG SSE (``answer_delta``, ``citations``, ``follow_up_questions``, ``done``) to gateway contract."""
+    async for chunk in _iter_upstream_sse_lines(response.aiter_lines()):
+        yield chunk
+
+
+async def _iter_upstream_sse_lines(
+    lines: Any,
+) -> AsyncGenerator[str, None]:
+    """Map upstream SSE lines to gateway contract (live stream or buffered body)."""
     block_lines: list[str] = []
     citations_acc: list[dict[str, Any]] = []
     follow_ups_acc: list[str] = []
     rewrite_acc: str | None = None
     timings_acc: dict[str, Any] | None = None
     usage_acc: dict[str, Any] | None = None
-    async for line in response.aiter_lines():
+    async for line in lines:
         if line.startswith(":"):
             continue
         if line == "":
