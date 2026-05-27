@@ -22,10 +22,10 @@ def test_normalize_nested_answer_and_meta():
         "meta": {
             "route": {
                 "type": "tool",
-                "tool": "user_profile",
+                "tool": "rag_private_kb",
                 "source": "llm_router",
             },
-            "tool": {"name": "user_profile", "key": "tool_rag"},
+            "tool": {"name": "rag_private_kb", "key": "tool_rag"},
             "rewrite": "taixing visa status in us",
         },
         "answer": {
@@ -41,7 +41,7 @@ def test_normalize_nested_answer_and_meta():
     }
     out = normalize_orchestrator_payload(raw)
     assert out["answer"] == "H4 EAD [1]"
-    assert out["route"] == "user_profile"
+    assert out["route"] == "rag_private_kb"
     assert out["rewrite"] == "taixing visa status in us"
     assert out["tool_meta"]["key"] == "tool_rag"
     assert "type" not in out
