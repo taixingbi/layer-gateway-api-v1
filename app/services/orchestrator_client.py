@@ -521,7 +521,7 @@ class OrchestratorClient:
                             if isinstance(text, str) and text:
                                 yield f"event: token\ndata: {json.dumps({'text': text})}\n\n"
                             continue
-                        if kind in ("request_id", "state"):
+                        if kind in ("correlation", "request_id", "state"):
                             continue
                         if kind == "done":
                             done_body = _gateway_done_payload(
@@ -820,6 +820,7 @@ def _token_text_from_sse_data(raw: str) -> str:
                 "rewrite",
                 "route",
                 "done",
+                "correlation",
                 "request_id",
                 "state",
                 "error",
@@ -1213,7 +1214,7 @@ async def _iter_upstream_sse_lines(
             if ndjson_type == "route" and ndjson is not None:
                 yield _format_route_sse_chunk(ndjson)
                 continue
-            if ndjson_type in ("request_id", "state"):
+            if ndjson_type in ("correlation", "request_id", "state"):
                 continue
             if ndjson_type == "answer" and ndjson is not None:
                 text = ndjson.get("text")
