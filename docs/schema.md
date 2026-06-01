@@ -175,6 +175,9 @@ Emitted first by the gateway (correlation for the client).
 | `trace_id` | string | |
 | `session_id` | string | |
 | `conversation_id` | string | Present when resolved |
+| `is_new_conversation` | boolean | `true` when this turn started a new thread (no client conversation id) |
+
+When the gateway mints `session_id`, it sets the **`huntai_session_id`** cookie (`HttpOnly`, `SameSite=Lax`, 30 days) so later requests reuse the same session without sending `X-Session-Id`.
 
 ### `event: rewrite`
 

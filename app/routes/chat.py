@@ -115,6 +115,9 @@ def _upstream_token_text_is_internal_context_error(text: str) -> bool:
 
 router = APIRouter(prefix="/v1", tags=["chat"])
 
+SESSION_COOKIE_NAME = "huntai_session_id"
+SESSION_COOKIE_MAX_AGE = 60 * 60 * 24 * 30  # 30 days
+
 
 def _generate_session_id() -> str:
     """Create gateway-owned session IDs when client does not supply one."""
@@ -122,7 +125,7 @@ def _generate_session_id() -> str:
 
 
 def _resolve_session_id(request: Request) -> str:
-    """Resolve session from ``X-Session-Id`` header or mint a gateway-owned id (never from JSON body)."""
+    """Resolve session from header, cookie, or mint (never from JSON body)."""
     header_raw = (request.headers.get("x-session-id") or "").strip()
     if header_raw:
         if len(header_raw) < 3 or len(header_raw) > 128:
@@ -131,7 +134,36 @@ def _resolve_session_id(request: Request) -> str:
                 detail="X-Session-Id must be between 3 and 128 characters",
             )
         return header_raw
-    return _generate_session_id()
+    cookie_raw = (request.cookies.get(SESSION_COOKIE_NAME) or "").strip()
+    if cookie_raw:
+        if len(cookie_raw) < 3 or len(cookie_raw) > 128:
+            raise HTTPException(
+                status_code=400,
+                detail="session cookie must be between 3 and 128 characters",
+            )
+        return cookie_raw
+    sid = _generate_session_id()
+    request.state.session_cookie_to_set = sid
+    return sid
+
+
+def _stream_response_headers(request: Request) -> dict[str, str]:
+    """SSE response headers including session cookie when the gateway minted a new id."""
+    headers = {"Cache-Control": "no-cache", "Connection": "keep-alive"}
+    sid = getattr(request.state, "session_cookie_to_set", None)
+    if sid:
+        headers["Set-Cookie"] = (
+            f"{SESSION_COOKIE_NAME}={sid}; Path=/; HttpOnly; SameSite=Lax; "
+            f"Max-Age={SESSION_COOKIE_MAX_AGE}"
+        )
+    return headers
+
+
+def _mark_is_new_conversation(request: Request, payload: ChatRequest) -> None:
+    """True when this turn starts a new thread (no conversation id from client or header)."""
+    header_conv = (request.headers.get("x-conversation-id") or "").strip()
+    body_conv = (payload.conversation_id or "").strip() if payload.conversation_id else ""
+    request.state.is_new_conversation = not (header_conv or body_conv)
 
 
 def _attach_chat_session_id(request: Request) -> str:
@@ -199,6 +231,9 @@ def _prepare_chat_history(request: Request, payload: ChatRequest) -> None:
     access_token = parse_bearer(request.headers.get("authorization"))
     user_id = request.state.auth_context["user_id"]
     conv_input = getattr(request.state, "conversation_id", None)
+    if conv_input is None:
+        conv_input = _resolve_conversation_id(request, payload)
+    request.state.is_new_conversation = conv_input is None
 
     try:
         conv_id = ensure_conversation(
@@ -361,6 +396,7 @@ async def chat(request: Request, payload: ChatRequest):
     """Handle chat (JSON or SSE) via orchestrator with correlation and validation."""
     request.state.access_log_stream = False
     _attach_chat_session_id(request)
+    _mark_is_new_conversation(request, payload)
     request.state.conversation_id = _resolve_conversation_id(request, payload)
     # Record ingress event with correlation fields before processing.
     log_event(
@@ -401,7 +437,7 @@ async def chat(request: Request, payload: ChatRequest):
         return StreamingResponse(
             _stream_response(request, orchestrator_payload),
             media_type="text/event-stream",
-            headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
+            headers=_stream_response_headers(request),
         )
 
     try:
@@ -423,12 +459,21 @@ async def chat(request: Request, payload: ChatRequest):
             done_payload=orchestrator_payload_dict(result),
         )
         conv_id = getattr(request.state, "conversation_id", None)
+        is_new = getattr(request.state, "is_new_conversation", False)
+        orch_raw = result.model_dump(mode="json")
+        if orch_raw.get("is_new_conversation") is not None:
+            is_new = bool(orch_raw["is_new_conversation"])
+        else:
+            meta = orch_raw.get("meta")
+            if isinstance(meta, dict) and meta.get("is_new_conversation") is not None:
+                is_new = bool(meta["is_new_conversation"])
         body = ChatResponse(
             status="success",
             session_id=orchestrator_payload.context.session_id,
             request_id=request.state.request_id,
             trace_id=request.state.trace_id,
             conversation_id=conv_id,
+            is_new_conversation=is_new,
             assistant_message_id=assistant_message_id,
             answer=result.answer,
             rewrite=getattr(result, "rewrite", None),
@@ -438,7 +483,18 @@ async def chat(request: Request, payload: ChatRequest):
             usage=normalize_orchestrator_usage(result),
             latency_ms=latency.build(request, orchestrator_workflow=orch_workflow),
         )
-        return JSONResponse(content=body.model_dump(mode="json", exclude_none=True))
+        json_resp = JSONResponse(content=body.model_dump(mode="json", exclude_none=True))
+        sid = getattr(request.state, "session_cookie_to_set", None)
+        if sid:
+            json_resp.set_cookie(
+                SESSION_COOKIE_NAME,
+                sid,
+                httponly=True,
+                samesite="lax",
+                max_age=SESSION_COOKIE_MAX_AGE,
+                path="/",
+            )
+        return json_resp
     except HTTPException as exc:
         # Keep mapped HTTP semantics while logging failure context.
         log_event("orchestrator_call_failed", **_chat_correlation_log_kwargs(request), status=exc.status_code)
@@ -464,6 +520,7 @@ async def _stream_response(request: Request, orchestrator_payload: OrchestratorC
         "request_id": request.state.request_id,
         "trace_id": request.state.trace_id,
         "session_id": orchestrator_payload.context.session_id,
+        "is_new_conversation": bool(getattr(request.state, "is_new_conversation", False)),
     }
     if stream_cid:
         meta["conversation_id"] = stream_cid
@@ -557,10 +614,19 @@ async def _stream_response(request: Request, orchestrator_payload: OrchestratorC
             )
             if stream_assistant_message_id:
                 done_body["assistant_message_id"] = stream_assistant_message_id
+            orch_is_new = done_body.get("is_new_conversation")
+            if orch_is_new is None:
+                done_meta = done_body.get("meta")
+                if isinstance(done_meta, dict) and "is_new_conversation" in done_meta:
+                    orch_is_new = done_meta.get("is_new_conversation")
+            if orch_is_new is not None:
+                done_body["is_new_conversation"] = bool(orch_is_new)
             if stream_assistant_message_id or stream_cid:
                 late_meta: dict[str, Any] = {}
                 if stream_cid:
                     late_meta["conversation_id"] = stream_cid
+                if orch_is_new is not None:
+                    late_meta["is_new_conversation"] = bool(orch_is_new)
                 if stream_assistant_message_id:
                     late_meta["assistant_message_id"] = stream_assistant_message_id
                 if stream_model:

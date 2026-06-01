@@ -23,6 +23,7 @@ class ChatResponse(BaseModel):
     request_id: str
     trace_id: str
     conversation_id: str | None = None
+    is_new_conversation: bool = False
     assistant_message_id: str | None = None
     answer: str
     rewrite: str | None = None
