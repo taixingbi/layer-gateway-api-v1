@@ -15,7 +15,7 @@ Correlation IDs (`request_id`, `trace_id`, `session_id`) are taken from **header
 | `Authorization` | Yes | `Bearer <access_token>` (Supabase session JWT or OIDC when using JWKS fallback) |
 | `Content-Type` | Yes | `application/json` |
 | `Accept` | No | `text/event-stream` to stream; omit for JSON response |
-| `X-Session-Id` | No | 3–128 chars; if omitted the gateway mints `sess_<hex>` |
+| `X-Session-Id` | No | 3–128 chars; if omitted the gateway mints `sess_<hex>` for this request. **Multi-turn:** send the same value on every `/v1/chat` call in a session (the gateway does not persist it across requests for you). |
 | `X-Conversation-Id` | No | 3–128 chars; **overrides** JSON `conversation_id` when set |
 | `X-Request-Id` | No | Echoed on response; minted if omitted |
 | `X-Trace-Id` | No | Echoed on response; minted if omitted |
