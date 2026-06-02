@@ -19,6 +19,7 @@ from app.routes.conversations import router as conversations_router
 from app.routes.feedback import router as feedback_router
 from app.routes.health import router as health_router
 from app.routes.metrics import router as metrics_router
+from app.routes.version import router as version_router
 from app.routes.profile import router as profile_router
 from app.services.jwt_validator import JwtValidator
 from app.services.orchestrator_client import OrchestratorClient
@@ -120,6 +121,7 @@ def create_app() -> FastAPI:
     app.include_router(conversations_router)
     app.include_router(feedback_router)
     app.include_router(health_router)
+    app.include_router(version_router)
     app.include_router(metrics_router)
     return app
 
