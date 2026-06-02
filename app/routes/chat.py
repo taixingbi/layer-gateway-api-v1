@@ -460,7 +460,7 @@ async def chat(request: Request, payload: ChatRequest):
         )
         conv_id = getattr(request.state, "conversation_id", None)
         is_new = getattr(request.state, "is_new_conversation", False)
-        orch_raw = result.model_dump(mode="json")
+        orch_raw = orchestrator_payload_dict(result)
         if orch_raw.get("is_new_conversation") is not None:
             is_new = bool(orch_raw["is_new_conversation"])
         else:
