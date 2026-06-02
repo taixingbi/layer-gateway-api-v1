@@ -124,21 +124,16 @@ Or with Compose:
 docker compose up --build
 ```
 
-Run an image published from CI (replace `YOUR_DOCKERHUB_USER` with your Docker Hub username or org):
+Run an image published from CI:
 
 ```bash
-docker pull YOUR_DOCKERHUB_USER/layer-gateway-api-v1:latest
-docker run -p 8000:8000 --env-file .env YOUR_DOCKERHUB_USER/layer-gateway-api-v1:latest
+docker pull ghcr.io/taixingbi/layer-gateway-api-v1:latest
+docker run -p 8000:8000 --env-file .env ghcr.io/taixingbi/layer-gateway-api-v1:latest
 ```
 
-**Docker Hub:** pushes to `main`, tags matching `v*`, and manual **workflow_dispatch** build and push the image (see [`.github/workflows/docker-push.yml`](.github/workflows/docker-push.yml)). Add repository secrets **Settings → Secrets and variables → Actions**:
+**GHCR:** pushes to `main`, tags matching `v*`, and manual **workflow_dispatch** build and push the image (see [`.github/workflows/docker-push.yml`](.github/workflows/docker-push.yml)). Repository secret **`HUNTAI_K3S_PAT`** pins GitOps in huntai-k3s on `main` push.
 
-| Secret | Description |
-| --- | --- |
-| `DOCKERHUB_USERNAME` | Docker Hub username or organization |
-| `DOCKERHUB_TOKEN` | Docker Hub access token (recommended) |
-
-Images: `YOUR_DOCKERHUB_USER/layer-gateway-api-v1:latest`, `YOUR_DOCKERHUB_USER/layer-gateway-api-v1:<version-or-short-sha>`, and `YOUR_DOCKERHUB_USER/layer-gateway-api-v1:<full-git-sha>`.
+Images: `ghcr.io/taixingbi/layer-gateway-api-v1:latest`, `ghcr.io/taixingbi/layer-gateway-api-v1:<version-or-short-sha>`, and `ghcr.io/taixingbi/layer-gateway-api-v1:<full-git-sha>`.
 
 **CI:** [`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs `pytest` on pushes and pull requests to `main`.
 
