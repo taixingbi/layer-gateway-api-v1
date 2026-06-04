@@ -93,8 +93,9 @@ jobs:
             ${{ env.IMAGE }}:latest
             ${{ env.IMAGE }}:${{ steps.version.outputs.version }}
             ${{ env.IMAGE }}:${{ github.sha }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # scope isolates cache per repo; ignore-error avoids flaky GHA cache export (image push already succeeded).
+          cache-from: type=gha,scope=${{ github.repository }}
+          cache-to: type=gha,mode=max,scope=${{ github.repository }},ignore-error=true
 
   update-gitops-dev:
     needs: push
