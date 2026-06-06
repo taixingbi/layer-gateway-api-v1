@@ -29,7 +29,7 @@ Unknown JSON keys are rejected (`422`).
 | `message` | string | Yes | 1–4000 chars after trim (config: `CHAT_MESSAGE_MAX_LENGTH`) |
 | `history` | array | No | Up to 100 prior turns; see [History message](#history-message). Default `[]` |
 | `conversation_id` | string | No | 3–128 chars |
-| `stream` | boolean | No | Default `false`; use with `Accept: text/event-stream` for SSE |
+| `stream` | boolean | No | Default `true`; set `false` for aggregated JSON instead of SSE |
 | `client_timestamp` | string (ISO 8601) | No | Opaque client timestamp |
 | `metadata` | object | No | Default `{}`; forwarded to orchestrator client info |
 

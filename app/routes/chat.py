@@ -426,9 +426,8 @@ async def chat(request: Request, payload: ChatRequest):
     elif orchestrator_payload.context.conversation_id:
         request.state.conversation_id = orchestrator_payload.context.conversation_id
 
-    # Streaming: `Accept: text/event-stream` or JSON `"stream": true` (query flags are not supported).
-    accept = (request.headers.get("accept") or "").lower()
-    wants_stream = "text/event-stream" in accept or payload.stream is True
+    # Streaming is default (`stream: true`); set `"stream": false` for aggregated JSON (query flags are not supported).
+    wants_stream = payload.stream is not False
     client = request.app.state.orchestrator_client
 
     if wants_stream:
