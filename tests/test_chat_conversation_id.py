@@ -14,7 +14,7 @@ class StubStreamClient:
         raise AssertionError("stream test")
 
     async def stream_chat(self, payload, ctx=None):
-        yield 'event: token\ndata: {"text":"Hi"}\n\n'
+        yield 'event: answer_delta\ndata: {"text":"Hi"}\n\n'
         yield 'event: done\ndata: {"status":"success"}\n\n'
 
 

@@ -272,10 +272,10 @@ Example stream:
 event: meta
 data: {"request_id":"req_abc123","trace_id":"trace_xyz789","session_id":"sess_123"}
 
-event: token
+event: answer_delta
 data: {"text":"Hello"}
 
-event: token
+event: answer_delta
 data: {"text":" world"}
 
 event: done

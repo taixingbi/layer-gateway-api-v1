@@ -38,7 +38,7 @@ class CapturingOrchestratorStub:
         """Stream chat."""
         self.stream_payload = payload
         self.stream_ctx = ctx
-        yield 'event: token\ndata: {"text":"x"}\n\n'
+        yield 'event: answer_delta\ndata: {"text":"x"}\n\n'
 
 
 class StubOrchestratorClient:
@@ -59,8 +59,8 @@ class StubOrchestratorClient:
 
     async def stream_chat(self, payload, ctx=None):
         """Stream chat."""
-        yield 'event: token\ndata: {"text":"Hello"}\n\n'
-        yield 'event: token\ndata: {"text":" world"}\n\n'
+        yield 'event: answer_delta\ndata: {"text":"Hello"}\n\n'
+        yield 'event: answer_delta\ndata: {"text":" world"}\n\n'
 
 
 def _auth_headers():
@@ -88,7 +88,7 @@ class StubOrchestratorWithFollowUps:
 
     async def stream_chat(self, payload, ctx=None):
         """Stream chat."""
-        yield 'event: token\ndata: {"text":"Hi"}\n\n'
+        yield 'event: answer_delta\ndata: {"text":"Hi"}\n\n'
 
 
 def test_chat_forwards_rewrite_from_upstream():
@@ -112,7 +112,7 @@ def test_chat_forwards_rewrite_from_upstream():
 
         async def stream_chat(self, payload, ctx=None):
             """Stream chat."""
-            yield 'event: token\ndata: {"text":"x"}\n\n'
+            yield 'event: answer_delta\ndata: {"text":"x"}\n\n'
 
     with TestClient(app) as client:
         app.state.orchestrator_client = StubWithRewrite()
@@ -381,7 +381,7 @@ class EnrichedDoneStreamStub:
             }
         )
         yield 'event: meta\ndata: {"request_id":"req_x","trace_id":"trace_x","session_id":"sess_x"}\n\n'
-        yield 'event: token\ndata: {"text":"H4 EAD."}\n\n'
+        yield 'event: answer_delta\ndata: {"text":"H4 EAD."}\n\n'
         yield f"event: done\ndata: {done}\n\n"
 
 
@@ -418,7 +418,7 @@ def test_chat_defaults_to_stream_when_stream_omitted():
         assert response.status_code == 200
         body = response.text
         assert "event: meta" in body
-        assert "event: token" in body
+        assert "event: answer_delta" in body
         assert "event: done" in body
 
 
@@ -435,7 +435,7 @@ def test_chat_streaming_contract():
         assert response.status_code == 200
         body = response.text
         assert "event: meta" in body
-        assert "event: token" in body
+        assert "event: answer_delta" in body
         assert "event: done" in body
         meta_line = [ln for ln in body.splitlines() if ln.startswith("data:") and "request_id" in ln][0]
         meta = json.loads(meta_line.split("data:", 1)[1].strip())
@@ -455,7 +455,7 @@ def test_chat_streaming_via_json_body_stream_flag():
         assert response.status_code == 200
         body = response.text
         assert "event: meta" in body
-        assert "event: token" in body
+        assert "event: answer_delta" in body
         assert "event: done" in body
 
 
@@ -466,12 +466,12 @@ class StubOrchestratorContextErrorInStream:
 
     async def stream_chat(self, *args, **kwargs):
         """Stream chat."""
-        yield 'event: token\ndata: {"text":"partial answer"}\n\n'
+        yield 'event: answer_delta\ndata: {"text":"partial answer"}\n\n'
         bad = (
             "Error: ValueError: <Token var=<ContextVar name='pipeline_phase' at 0x0> "
             "at 0x0> was created in a different Context"
         )
-        yield f"event: token\ndata: {json.dumps({'text': bad})}\n\n"
+        yield f"event: answer_delta\ndata: {json.dumps({'text': bad})}\n\n"
 
 
 def test_chat_stream_rewrites_contextvar_poison_token_to_sse_error():

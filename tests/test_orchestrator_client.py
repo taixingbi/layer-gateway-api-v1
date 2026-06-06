@@ -246,7 +246,7 @@ async def test_flat_headers_stream_parses_sse_tokens():
         orchestrator = OrchestratorClient(client=client, settings=settings)
         chunks = [c async for c in orchestrator.stream_chat(_payload(), _ctx(stream=True))]
 
-    token_chunks = [c for c in chunks if "event: token" in c]
+    token_chunks = [c for c in chunks if "event: answer_delta" in c]
     assert len(token_chunks) == 2
     import json as json_mod
 
@@ -276,7 +276,7 @@ async def test_flat_headers_stream_forwards_upstream_done_event():
         }
     )
     sse = (
-        b'event: token\ndata: {"text":"Hi"}\n\n'
+        b'event: answer_delta\ndata: {"text":"Hi"}\n\n'
         + f"event: done\ndata: {done_payload}\n\n".encode()
     )
 
@@ -346,7 +346,7 @@ async def test_flat_headers_stream_rag_events_aggregate_into_gateway_done():
         chunks = [c async for c in orchestrator.stream_chat(_payload(), _ctx(stream=True))]
 
     assert post_count == 1
-    token_chunks = [c for c in chunks if "event: token" in c]
+    token_chunks = [c for c in chunks if "event: answer_delta" in c]
     assert len(token_chunks) == 2
     done_chunk = next(c for c in chunks if c.lstrip().startswith("event: done"))
     done_data = json.loads([ln for ln in done_chunk.splitlines() if ln.startswith("data:")][0][5:].strip())
@@ -393,7 +393,7 @@ async def test_flat_headers_stream_orchestrator_rewrite_not_emitted_as_token():
 
     rewrite_chunks = [c for c in chunks if "event: rewrite" in c]
     route_chunks = [c for c in chunks if "event: route" in c]
-    token_chunks = [c for c in chunks if "event: token" in c]
+    token_chunks = [c for c in chunks if "event: answer_delta" in c]
     assert len(rewrite_chunks) == 1
     assert "candidate" in rewrite_chunks[0]
     assert len(route_chunks) == 1
@@ -447,7 +447,7 @@ async def test_flat_headers_stream_does_not_supplement_when_tokens_already_strea
     cite = {"cite_id": 1, "source": "personal_profile"}
     stream_sse = (
         b'event: rewrite\ndata: {"text":"visa?"}\n\n'
-        b'event: token\ndata: {"text":"H4 EAD."}\n\n'
+        b'event: answer_delta\ndata: {"text":"H4 EAD."}\n\n'
         + f"event: done\ndata: {json.dumps({'status': 'success', 'citations': [cite], 'follow_up_questions': ['Q?'], 'latency_ms': {'total': 3632.46}})}\n\n".encode()
     )
     post_count = 0
@@ -540,7 +540,7 @@ async def test_flat_headers_stream_yields_tokens_before_done_without_supplement(
     assert post_count == 1
     pre_done = [c for c in received if not c.lstrip().startswith("event: done")]
     assert len(pre_done) >= 2
-    assert all("event: token" in c for c in pre_done)
+    assert all("event: answer_delta" in c for c in pre_done)
     assert received[-1].lstrip().startswith("event: done")
 
 
@@ -577,7 +577,7 @@ async def test_flat_headers_stream_json_envelope_does_not_call_supplement():
         chunks = [c async for c in orchestrator.stream_chat(_payload(), _ctx(stream=True))]
 
     assert post_count == 1
-    assert any("event: token" in c for c in chunks)
+    assert any("event: answer_delta" in c for c in chunks)
     assert any(c.lstrip().startswith("event: done") for c in chunks)
 
 
@@ -683,7 +683,7 @@ async def test_flat_headers_stream_maps_json_envelope_to_token_and_done():
         orchestrator = OrchestratorClient(client=client, settings=settings)
         chunks = [c async for c in orchestrator.stream_chat(_payload(), _ctx(stream=True))]
 
-    token_chunks = [c for c in chunks if "event: token" in c]
+    token_chunks = [c for c in chunks if "event: answer_delta" in c]
     assert len(token_chunks) == 1
     assert "Hello! How can I help you today?" in token_chunks[0]
     done_chunk = next(c for c in chunks if c.lstrip().startswith("event: done"))

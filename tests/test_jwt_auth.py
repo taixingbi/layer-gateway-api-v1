@@ -27,7 +27,7 @@ class _StubOrch:
 
     async def stream_chat(self, payload, ctx=None):
         """Stream chat."""
-        yield 'event: token\ndata: {"text":"x"}\n\n'
+        yield 'event: answer_delta\ndata: {"text":"x"}\n\n'
 
 
 class _StaticJwkClient:

@@ -497,7 +497,7 @@ class OrchestratorClient:
                         parsed = json.loads(line)
                     except json.JSONDecodeError:
                         if line.strip():
-                            yield f"event: token\ndata: {json.dumps({'text': line})}\n\n"
+                            yield _format_answer_delta_sse_chunk(line)
                         continue
                     if not isinstance(parsed, dict):
                         continue
@@ -519,7 +519,7 @@ class OrchestratorClient:
                         if kind in ("answer_delta", "answer"):
                             text = parsed.get("text")
                             if isinstance(text, str) and text:
-                                yield f"event: token\ndata: {json.dumps({'text': text})}\n\n"
+                                yield _format_answer_delta_sse_chunk(text)
                             continue
                         if kind in ("correlation", "request_id", "state"):
                             continue
@@ -539,7 +539,7 @@ class OrchestratorClient:
                             continue
                     text = parsed.get("text") or parsed.get("token") or ""
                     if text:
-                        yield f"event: token\ndata: {json.dumps({'text': text})}\n\n"
+                        yield _format_answer_delta_sse_chunk(text)
             if not stream_done_sent:
                 result = await self._chat_gateway_json(payload, ctx)
                 done_body = _done_body_from_orchestrator_result(result)
@@ -798,6 +798,11 @@ def _orchestrator_sse_ndjson_type(raw: str) -> tuple[str | None, dict[str, Any] 
     return None, parsed
 
 
+def _format_answer_delta_sse_chunk(text: str) -> str:
+    """Format one gateway ``answer_delta`` SSE event (shared token contract)."""
+    return f"event: answer_delta\ndata: {json.dumps({'text': text})}\n\n"
+
+
 def _format_rewrite_sse_chunk(text: str) -> str:
     """Format one gateway ``rewrite`` SSE event."""
     return f"event: rewrite\ndata: {json.dumps({'text': text})}\n\n"
@@ -885,7 +890,7 @@ async def _gateway_chunks_from_orchestrator_json(parsed: dict[str, Any]) -> Asyn
 
     answer = normalized.get("answer")
     if isinstance(answer, str) and answer:
-        yield f"event: token\ndata: {json.dumps({'text': answer})}\n\n"
+        yield _format_answer_delta_sse_chunk(answer)
 
     done_body = gateway_done_fields_from_normalized(normalized)
     if not done_body.get("status"):
@@ -1219,7 +1224,7 @@ async def _iter_upstream_sse_lines(
             if ndjson_type == "answer" and ndjson is not None:
                 text = ndjson.get("text")
                 if isinstance(text, str) and text:
-                    yield f"event: token\ndata: {json.dumps({'text': text})}\n\n"
+                    yield f"event: answer_delta\ndata: {json.dumps({'text': text})}\n\n"
                 for item in ndjson.get("citations") or []:
                     if isinstance(item, dict):
                         citations_acc.append(item)
@@ -1287,6 +1292,6 @@ async def _iter_upstream_sse_lines(
             if event_name in ("answer_delta", "token", "message", ""):
                 text = _token_text_from_sse_data(raw)
                 if text:
-                    yield f"event: token\ndata: {json.dumps({'text': text})}\n\n"
+                    yield f"event: answer_delta\ndata: {json.dumps({'text': text})}\n\n"
             continue
         block_lines.append(line)

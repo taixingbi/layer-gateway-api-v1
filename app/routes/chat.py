@@ -43,7 +43,7 @@ from app.services.chat_latency import (
 from app.services.orchestrator_call_context import OrchestratorCallContext
 
 def _gateway_sse_chunk_token_text(chunk: str) -> str | None:
-    """Parse ``event: token`` / ``data: {...}`` frame produced by ``OrchestratorClient``."""
+    """Parse ``event: answer_delta`` (or legacy ``token``) / ``data: {...}`` frame."""
     event_name = "message"
     data_raw: str | None = None
     for line in chunk.splitlines():
@@ -51,7 +51,7 @@ def _gateway_sse_chunk_token_text(chunk: str) -> str | None:
             event_name = line[6:].strip().lower()
         elif line.startswith("data:"):
             data_raw = line[5:].strip()
-    if event_name != "token" or not data_raw:
+    if event_name not in ("answer_delta", "token") or not data_raw:
         return None
     try:
         obj = json.loads(data_raw)

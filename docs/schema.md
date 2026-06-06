@@ -199,7 +199,7 @@ Routing decision from orchestrator (passthrough when upstream emits `type: route
 | `route_source` | string | e.g. `deterministic_rule`, `llm_router` |
 | `text` | string | Rewritten question (same as rewrite when present) |
 
-### `event: token`
+### `event: answer_delta`
 
 Incremental answer text.
 
@@ -229,7 +229,7 @@ Example:
 event: meta
 data: {"request_id":"req_demo_002","trace_id":"trace_demo_002","session_id":"sess_123","conversation_id":"conv_000"}
 
-event: token
+event: answer_delta
 data: {"text":"Taixing Bi's visa status in the US is H4 EAD [1]."}
 
 event: done
