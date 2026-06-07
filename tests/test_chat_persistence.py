@@ -99,7 +99,7 @@ def test_chat_persists_on_success(
     response = client.post(
         "/v1/chat",
         headers=_auth_headers(),
-        json={"message": "Hello", "conversation_id": conv_id},
+        json={"message": "Hello", "conversation_id": conv_id, "stream": False},
     )
     assert response.status_code == 200
     body = response.json()

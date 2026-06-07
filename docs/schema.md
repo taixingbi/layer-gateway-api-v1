@@ -375,7 +375,8 @@ Used in JSON `ChatResponse.error` when present.
 | `404` | Unknown or unowned `conversation_id` when persisting or loading history |
 | `422` | JSON validation (unknown fields, bad types) |
 | `502` / `504` | Orchestrator failure / timeout |
-| `503` | Inflight limit (`MAX_INFLIGHT_REQUESTS`) |
+| `429` | Chat rate limit (`RATE_LIMIT_CHAT_*`) or per-user chat concurrency (`MAX_CONCURRENT_STREAMS_PER_USER`) |
+| `503` | Inflight limit (`MAX_INFLIGHT_REQUESTS`) or global chat concurrency (`MAX_CONCURRENT_CHAT_STREAMS`) |
 
 ---
 

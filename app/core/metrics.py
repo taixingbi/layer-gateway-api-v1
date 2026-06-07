@@ -14,6 +14,12 @@ REJECTED_TOTAL = Counter(
     ["reason"],
 )
 
+RATE_LIMIT_REJECTED = Counter(
+    "gateway_rate_limit_rejected_total",
+    "Chat rate or concurrency rejections",
+    ["reason"],
+)
+
 LATENCY_MS = Histogram(
     "gateway_request_latency_ms",
     "End-to-end request latency in milliseconds",
@@ -31,4 +37,9 @@ TTFB_MS = Histogram(
 INFLIGHT = Gauge(
     "gateway_inflight_requests",
     "Number of requests currently inside the gateway (after inflight gate)",
+)
+
+CHAT_STREAMS_INFLIGHT = Gauge(
+    "gateway_chat_streams_inflight",
+    "Number of in-flight POST /v1/chat requests (chat limits middleware)",
 )
