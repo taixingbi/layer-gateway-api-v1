@@ -1146,6 +1146,7 @@ def _gateway_done_payload(
         "route_source",
         "latency_ms",
         "usage",
+        "rag",
     ):
         val = merged.get(key)
         if val:
