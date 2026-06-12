@@ -219,6 +219,15 @@ def _normalize_request(payload: ChatRequest, request: Request) -> ChatRequest:
 
 def _prepare_chat_history(request: Request, payload: ChatRequest) -> None:
     """Load DB history, merge client tail, persist user message when Supabase is available."""
+    if request.state.auth_context.get("guest"):
+        log_event(
+            "chat_history_skipped",
+            path="/v1/chat",
+            reason="guest_session",
+            **_chat_correlation_log_kwargs(request),
+        )
+        return
+
     if not persistence_enabled():
         log_event(
             "chat_history_skipped",
