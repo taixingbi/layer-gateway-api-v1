@@ -54,6 +54,11 @@ class Settings(BaseSettings):
     additional_frontend_urls: str = ""
     jwt_expiry_seconds: int = 3600
 
+    # Guest /chat: BFF sends a shared service bearer; identity is fixed ``anyuser`` (public RAG only).
+    guest_chat_enabled: bool = False
+    guest_chat_service_token: str = ""
+    guest_chat_user_id: str = "guest"
+
     chat_message_max_length: int = 4000
     chat_assistant_model: str = ""
     # Set true only after ``alter table messages add column status text`` in Supabase.

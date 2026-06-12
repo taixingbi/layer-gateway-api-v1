@@ -9,6 +9,7 @@ from starlette.responses import JSONResponse, Response
 
 from app.core.config import get_settings
 from app.middleware.paths import PUBLIC_AUTH_PATHS, PUBLIC_PROBE_PATHS
+from app.services.guest_chat import try_guest_chat_auth
 from app.services.jwt_validator import JwtVerifyError
 from app.services.supabase_auth import SupabaseAuthError, verify_access_token_to_auth_context
 
@@ -48,6 +49,12 @@ class AuthMiddleware(BaseHTTPMiddleware):
 
         settings = get_settings()
         auth_start = time.perf_counter()
+        guest_ctx = try_guest_chat_auth(token, settings)
+        if guest_ctx is not None:
+            request.state.auth_context = guest_ctx
+            request.state.auth_ms = (time.perf_counter() - auth_start) * 1000
+            return await call_next(request)
+
         if settings.supabase_enabled:
             try:
                 request.state.auth_context = await asyncio.to_thread(
