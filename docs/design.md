@@ -35,7 +35,8 @@ Outermost first on the incoming request:
 1. **Request context** — `X-Request-Id`, `X-Trace-Id` (or generated); echo on response.
 2. **Structured access log** — `request_complete` JSON log + Prometheus observe on completion (for SSE, wraps the body iterator for total latency and client disconnect).
 3. **Auth** — bearer stub (production: JWT / API key); does not trust client role headers for upstream.
-4. **Inflight limit** — bounded concurrency; **503** when over cap (health/ready/metrics/docs exempt).
+4. **Chat limits** — `POST /v1/chat` only: per-user RPM (token bucket), per-user concurrency, global chat concurrency; **429** / **503** when exceeded.
+5. **Inflight limit** — bounded concurrency; **503** when over cap (health/ready/metrics/docs exempt).
 
 ## API Contracts
 
@@ -107,6 +108,7 @@ Streaming events:
 - `app/core/logging.py`: structured log helper.
 - `app/middleware/request_context.py`: correlation IDs.
 - `app/middleware/access_log.py`: `request_complete` logging and histogram updates.
+- `app/middleware/chat_limits.py`: chat RPM + per-user/global concurrency (`POST /v1/chat`).
 - `app/middleware/inflight.py`: concurrency cap (backpressure).
 - `app/middleware/auth.py`: auth guard and context extraction.
 - `app/routes/chat.py`: main gateway endpoint and SSE handling.

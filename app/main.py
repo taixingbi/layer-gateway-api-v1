@@ -11,6 +11,7 @@ from app.core.config import get_settings
 from app.core.logging import configure_logging, log_event
 from app.middleware.access_log import StructuredAccessLogMiddleware
 from app.middleware.auth import AuthMiddleware
+from app.middleware.chat_limits import ChatLimitsMiddleware
 from app.middleware.inflight import InflightLimitMiddleware
 from app.middleware.request_context import RequestContextMiddleware
 from app.routes.auth import router as auth_router
@@ -109,8 +110,9 @@ def create_app() -> FastAPI:
         )
         return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
 
-    # Order: last added = outermost on request. Target: request_id → access log → auth → inflight → routes.
+    # Order: last added = outermost. Target: request_id → access log → auth → chat limits → inflight → routes.
     app.add_middleware(InflightLimitMiddleware)
+    app.add_middleware(ChatLimitsMiddleware)
     app.add_middleware(AuthMiddleware)
     app.add_middleware(StructuredAccessLogMiddleware)
     app.add_middleware(RequestContextMiddleware)

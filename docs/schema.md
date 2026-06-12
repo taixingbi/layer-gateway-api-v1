@@ -29,7 +29,7 @@ Unknown JSON keys are rejected (`422`).
 | `message` | string | Yes | 1–4000 chars after trim (config: `CHAT_MESSAGE_MAX_LENGTH`) |
 | `history` | array | No | Up to 100 prior turns; see [History message](#history-message). Default `[]` |
 | `conversation_id` | string | No | 3–128 chars |
-| `stream` | boolean | No | Default `false`; use with `Accept: text/event-stream` for SSE |
+| `stream` | boolean | No | Default `true`; set `false` for aggregated JSON instead of SSE |
 | `client_timestamp` | string (ISO 8601) | No | Opaque client timestamp |
 | `metadata` | object | No | Default `{}`; forwarded to orchestrator client info |
 
@@ -199,7 +199,7 @@ Routing decision from orchestrator (passthrough when upstream emits `type: route
 | `route_source` | string | e.g. `deterministic_rule`, `llm_router` |
 | `text` | string | Rewritten question (same as rewrite when present) |
 
-### `event: token`
+### `event: answer_delta`
 
 Incremental answer text.
 
@@ -229,7 +229,7 @@ Example:
 event: meta
 data: {"request_id":"req_demo_002","trace_id":"trace_demo_002","session_id":"sess_123","conversation_id":"conv_000"}
 
-event: token
+event: answer_delta
 data: {"text":"Taixing Bi's visa status in the US is H4 EAD [1]."}
 
 event: done
@@ -375,7 +375,8 @@ Used in JSON `ChatResponse.error` when present.
 | `404` | Unknown or unowned `conversation_id` when persisting or loading history |
 | `422` | JSON validation (unknown fields, bad types) |
 | `502` / `504` | Orchestrator failure / timeout |
-| `503` | Inflight limit (`MAX_INFLIGHT_REQUESTS`) |
+| `429` | Chat rate limit (`RATE_LIMIT_CHAT_*`) or per-user chat concurrency (`MAX_CONCURRENT_STREAMS_PER_USER`) |
+| `503` | Inflight limit (`MAX_INFLIGHT_REQUESTS`) or global chat concurrency (`MAX_CONCURRENT_CHAT_STREAMS`) |
 
 ---
 

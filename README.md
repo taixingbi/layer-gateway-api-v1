@@ -272,10 +272,10 @@ Example stream:
 event: meta
 data: {"request_id":"req_abc123","trace_id":"trace_xyz789","session_id":"sess_123"}
 
-event: token
+event: answer_delta
 data: {"text":"Hello"}
 
-event: token
+event: answer_delta
 data: {"text":" world"}
 
 event: done
@@ -292,7 +292,7 @@ The gateway aggregates upstream RAG events (`citations`, `follow_up_questions`) 
 
 ### Middleware order (request → route)
 
-Outermost first: **request context** (`X-Request-Id` / `X-Trace-Id`) → **structured access log** (latency, `request_complete` JSON log + Prometheus) → **auth** → **inflight cap** → routes.
+Outermost first: **request context** (`X-Request-Id` / `X-Trace-Id`) → **structured access log** (latency, `request_complete` JSON log + Prometheus) → **auth** → **chat limits** (`POST /v1/chat` RPM + concurrency) → **inflight cap** → routes.
 
 ### `request_complete` log
 
@@ -307,10 +307,23 @@ Every finished request emits a structured log line via `python-json-logger` with
 - `gateway_ttfb_ms_bucket` (streaming TTFB, histogram)
 - `gateway_inflight_requests` (gauge)
 - `gateway_rejected_requests_total{reason}` (e.g. `inflight_limit`)
+- `gateway_rate_limit_rejected_total{reason}` (e.g. `chat_rpm`, `chat_inflight_user`, `chat_inflight_global`)
+- `gateway_chat_streams_inflight` (gauge)
 
 ### Backpressure
 
-`MAX_INFLIGHT_REQUESTS` (default `100`) caps concurrent non-exempt requests; excess clients receive **503**. Probes (`/health`, `/ready`, `/metrics`, `/docs`, `/openapi.json`) bypass the cap.
+`MAX_INFLIGHT_REQUESTS` (default `16`) caps concurrent non-exempt requests; excess clients receive **503**. Probes (`/health`, `/ready`, `/metrics`, `/docs`, `/openapi.json`) bypass the cap.
+
+`POST /v1/chat` has additional limits (tuned from Locust MCP load tests at ~0.23 RPS / ~17s TTFT):
+
+| Env | Default | Effect |
+|-----|---------|--------|
+| `RATE_LIMIT_CHAT_REQUESTS_PER_MIN` | `6` | Per-user token bucket; **429** with `Retry-After` |
+| `RATE_LIMIT_CHAT_BURST` | `2` | Burst capacity for the RPM bucket |
+| `MAX_CONCURRENT_STREAMS_PER_USER` | `2` | Per-user in-flight chat slots; **429** |
+| `MAX_CONCURRENT_CHAT_STREAMS` | `8` | Global in-flight chat slots; **503** |
+
+Set any limit to `0` to disable it. Chat limit counters apply to all `POST /v1/chat` requests (stream and non-stream).
 
 ### Retry safety
 
@@ -318,7 +331,7 @@ Non-stream orchestrator calls use bounded retries; **streaming** orchestrator ca
 
 ### Roadmap (not implemented here)
 
-Circuit breaker per upstream, health-scored routing, static API-key auth, rate limits, queue wait time / max age, graceful shutdown hooks beyond uvicorn defaults, and richer header sanitization — good next steps aligned with production AI gateways.
+Circuit breaker per upstream, health-scored routing, static API-key auth, queue wait time / max age, graceful shutdown hooks beyond uvicorn defaults, and richer header sanitization — good next steps aligned with production AI gateways.
 
 ## Notes
 

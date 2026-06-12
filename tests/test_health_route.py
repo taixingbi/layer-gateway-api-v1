@@ -90,3 +90,17 @@ def test_ready_probe_disabled_returns_200(monkeypatch):
     get_settings.cache_clear()
     assert response.status_code == 200
     assert response.json()["orchestrator"] == "probe_disabled"
+
+
+def test_ready_503_when_prod_frontend_url_is_localhost(monkeypatch):
+    """Prod readiness fails when FRONTEND_URL is still localhost (broken reset links)."""
+    monkeypatch.setenv("ENV", "prod")
+    monkeypatch.setenv("FRONTEND_URL", "http://localhost:3000")
+    monkeypatch.setenv("ORCHESTRATOR_READINESS_PROBE_ENABLED", "false")
+    get_settings.cache_clear()
+    app = create_app()
+    with TestClient(app) as client:
+        response = client.get("/ready")
+    get_settings.cache_clear()
+    assert response.status_code == 503
+    assert "localhost" in response.json()["detail"].lower()

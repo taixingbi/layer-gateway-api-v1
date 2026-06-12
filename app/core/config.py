@@ -16,13 +16,17 @@ class Settings(BaseSettings):
     service_name: str = "gateway-api"
     env: str = "dev"
 
-    max_inflight_requests: int = 100
+    max_inflight_requests: int = 16
+    max_concurrent_chat_streams: int = 8
+    max_concurrent_streams_per_user: int = 2
+    rate_limit_chat_requests_per_min: int = 6
+    rate_limit_chat_burst: int = 2
 
     orchestrator_base_url: str = "http://192.168.86.179:30184"
     orchestrator_chat_path: str = "/v1/orchestrator/answer"
     orchestrator_feedback_path: str = "/feedback"
     orchestrator_contract: Literal["gateway_json", "flat_headers"] = "gateway_json"
-    orchestrator_timeout_ms: int = 15000
+    orchestrator_timeout_ms: int = 120000
     orchestrator_retry_max_attempts: int = 2
     orchestrator_readiness_path: str = "/health"
     orchestrator_readiness_timeout_ms: int = 3000

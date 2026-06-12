@@ -50,6 +50,16 @@ def normalize_orchestrator_payload(parsed: dict[str, Any]) -> dict[str, Any]:
         if isinstance(tool, dict):
             out["tool_meta"] = tool
 
+    rag = out.get("rag")
+    if not isinstance(rag, dict):
+        rag = None
+        if isinstance(meta, dict):
+            nested = meta.get("rag")
+            if isinstance(nested, dict):
+                rag = nested
+        if rag is not None:
+            out["rag"] = rag
+
     out.pop("type", None)
     out.pop("stream", None)
     return out
@@ -117,5 +127,9 @@ def gateway_done_fields_from_normalized(normalized: dict[str, Any]) -> dict[str,
     tool_meta = normalized.get("tool_meta")
     if isinstance(tool_meta, dict):
         body["tool_meta"] = tool_meta
+
+    rag = normalized.get("rag")
+    if isinstance(rag, dict) and rag:
+        body["rag"] = rag
 
     return body

@@ -33,3 +33,4 @@ exclude = ["tests*", "sql*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+pythonpath = ["."]

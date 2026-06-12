@@ -95,7 +95,7 @@ curl -N -sS -X POST "http://192.168.86.179:30185/v1/chat" \
   }'
 ```
 
-Expect lines starting with `event: meta`, then optional `event: rewrite`, then one or more `event: token`, then `event: done` with `latency_ms` and `usage` when upstream provides them.
+Expect lines starting with `event: meta`, then optional `event: rewrite`, then one or more `event: answer_delta`, then `event: done` with `latency_ms` and `usage` when upstream provides them.
 
 ### HuntAI web (Next BFF) — translated SSE
 

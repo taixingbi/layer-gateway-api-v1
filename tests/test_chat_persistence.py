@@ -48,7 +48,7 @@ class StubOrchestratorClient:
         )()
 
     async def stream_chat(self, payload, ctx=None):
-        yield 'event: token\ndata: {"text":"Hi"}\n\n'
+        yield 'event: answer_delta\ndata: {"text":"Hi"}\n\n'
 
 
 class StubStreamRewriteThenAnswerClient:
@@ -59,7 +59,7 @@ class StubStreamRewriteThenAnswerClient:
 
     async def stream_chat(self, payload, ctx=None):
         yield 'event: rewrite\ndata: {"text":"how are you?"}\n\n'
-        yield 'event: token\ndata: {"text":"I\'m doing well and ready to help."}\n\n'
+        yield 'event: answer_delta\ndata: {"text":"I\'m doing well and ready to help."}\n\n'
         yield (
             'event: done\ndata: {"status":"success","rewrite":"how are you?",'
             '"citations":[{"source":"personal_profile"}],"follow_up_questions":[],'
@@ -71,7 +71,7 @@ def test_gateway_sse_chunk_token_text_ignores_rewrite():
     """Rewrite SSE frames must not contribute to assistant persistence text."""
     assert _gateway_sse_chunk_token_text('event: rewrite\ndata: {"text":"how are you?"}\n\n') is None
     assert (
-        _gateway_sse_chunk_token_text('event: token\ndata: {"text":"I\'m doing well."}\n\n')
+        _gateway_sse_chunk_token_text('event: answer_delta\ndata: {"text":"I\'m doing well."}\n\n')
         == "I'm doing well."
     )
 
@@ -99,7 +99,7 @@ def test_chat_persists_on_success(
     response = client.post(
         "/v1/chat",
         headers=_auth_headers(),
-        json={"message": "Hello", "conversation_id": conv_id},
+        json={"message": "Hello", "conversation_id": conv_id, "stream": False},
     )
     assert response.status_code == 200
     body = response.json()

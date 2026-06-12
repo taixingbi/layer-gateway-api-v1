@@ -81,3 +81,14 @@ def test_gateway_done_fields_from_normalized_status_ok():
         {"status": {"ok": True, "state": "completed"}, "answer": "hi"}
     )
     assert fields["status"] == "success"
+
+
+def test_gateway_done_fields_includes_rag():
+    rag = {
+        "collection": "taixing_knowledge",
+        "retrieval": {"retrieved_chunks": 40, "reranked_chunks": 10, "context_chunks": 5},
+    }
+    fields = gateway_done_fields_from_normalized(
+        {"status": {"ok": True}, "rag": rag, "answer": "hi"}
+    )
+    assert fields["rag"] == rag

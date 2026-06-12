@@ -38,7 +38,7 @@ class CapturingOrchestratorStub:
         """Stream chat."""
         self.stream_payload = payload
         self.stream_ctx = ctx
-        yield 'event: token\ndata: {"text":"x"}\n\n'
+        yield 'event: answer_delta\ndata: {"text":"x"}\n\n'
 
 
 class StubOrchestratorClient:
@@ -59,8 +59,8 @@ class StubOrchestratorClient:
 
     async def stream_chat(self, payload, ctx=None):
         """Stream chat."""
-        yield 'event: token\ndata: {"text":"Hello"}\n\n'
-        yield 'event: token\ndata: {"text":" world"}\n\n'
+        yield 'event: answer_delta\ndata: {"text":"Hello"}\n\n'
+        yield 'event: answer_delta\ndata: {"text":" world"}\n\n'
 
 
 def _auth_headers():
@@ -88,7 +88,7 @@ class StubOrchestratorWithFollowUps:
 
     async def stream_chat(self, payload, ctx=None):
         """Stream chat."""
-        yield 'event: token\ndata: {"text":"Hi"}\n\n'
+        yield 'event: answer_delta\ndata: {"text":"Hi"}\n\n'
 
 
 def test_chat_forwards_rewrite_from_upstream():
@@ -112,14 +112,14 @@ def test_chat_forwards_rewrite_from_upstream():
 
         async def stream_chat(self, payload, ctx=None):
             """Stream chat."""
-            yield 'event: token\ndata: {"text":"x"}\n\n'
+            yield 'event: answer_delta\ndata: {"text":"x"}\n\n'
 
     with TestClient(app) as client:
         app.state.orchestrator_client = StubWithRewrite()
         response = client.post(
             "/v1/chat",
             headers=_auth_headers(),
-            json={"message": "visa?", "metadata": {}},
+            json={"message": "visa?", "stream": False, "metadata": {}},
         )
         assert response.status_code == 200
         assert response.json()["rewrite"] == "What is the candidate's visa status?"
@@ -133,7 +133,7 @@ def test_chat_forwards_follow_up_questions_from_upstream():
         response = client.post(
             "/v1/chat",
             headers=_auth_headers(),
-            json={"message": "visa status?", "metadata": {}},
+            json={"message": "visa status?", "stream": False, "metadata": {}},
         )
         assert response.status_code == 200
         data = response.json()
@@ -151,7 +151,7 @@ def test_chat_returns_stable_response_contract():
         response = client.post(
             "/v1/chat",
             headers=_auth_headers(),
-            json={"message": "What is the return policy?", "metadata": {"page": "/support"}},
+            json={"message": "What is the return policy?", "stream": False, "metadata": {"page": "/support"}},
         )
         assert response.status_code == 200
         data = response.json()
@@ -171,7 +171,7 @@ def test_chat_uses_x_session_id_header_when_present():
         response = client.post(
             "/v1/chat",
             headers={**_auth_headers(), "X-Session-Id": "ses-from-header-99"},
-            json={"message": "What is the return policy?", "metadata": {"page": "/support"}},
+            json={"message": "What is the return policy?", "stream": False, "metadata": {"page": "/support"}},
         )
         assert response.status_code == 200
         assert response.json()["session_id"] == "ses-from-header-99"
@@ -185,7 +185,7 @@ def test_chat_rejects_session_id_in_json_body():
         response = client.post(
             "/v1/chat",
             headers=_auth_headers(),
-            json={"session_id": "sess-from-body", "message": "Hi", "metadata": {}},
+            json={"session_id": "sess-from-body", "message": "Hi", "stream": False, "metadata": {}},
         )
     assert response.status_code == 422
 
@@ -207,7 +207,7 @@ def test_chat_logs_and_request_complete_include_conversation_id_when_provided():
             response = client.post(
                 "/v1/chat",
                 headers=_auth_headers(),
-                json={"message": "Hi", "metadata": {}, "conversation_id": "conv-access-log-001"},
+                json={"message": "Hi", "stream": False, "metadata": {}, "conversation_id": "conv-access-log-001"},
             )
         assert response.status_code == 200
 
@@ -240,6 +240,7 @@ def test_chat_passes_history_to_orchestrator_client():
             headers=_auth_headers(),
             json={
                 "message": "what is Taixing US visa status?",
+                "stream": False,
                 "conversation_id": "conv-smoke-1",
                 "metadata": {},
                 "history": history,
@@ -259,7 +260,7 @@ def test_chat_passes_conversation_id_to_orchestrator_client_from_json_body():
         response = client.post(
             "/v1/chat",
             headers=_auth_headers(),
-            json={"message": "Hi", "metadata": {}, "conversation_id": "conv-from-json-001"},
+            json={"message": "Hi", "stream": False, "metadata": {}, "conversation_id": "conv-from-json-001"},
         )
         assert response.status_code == 200
     assert stub.chat_payload.context.conversation_id == "conv-from-json-001"
@@ -276,7 +277,7 @@ def test_chat_passes_conversation_id_from_x_conversation_id_header():
         response = client.post(
             "/v1/chat",
             headers={**_auth_headers(), "X-Conversation-Id": "conv-from-header-002"},
-            json={"message": "Hi", "metadata": {}},
+            json={"message": "Hi", "stream": False, "metadata": {}},
         )
         assert response.status_code == 200
     assert stub.chat_payload.context.conversation_id == "conv-from-header-002"
@@ -292,7 +293,7 @@ def test_chat_x_conversation_id_header_overrides_json_body():
         response = client.post(
             "/v1/chat",
             headers={**_auth_headers(), "X-Conversation-Id": "conv-header-wins"},
-            json={"message": "Hi", "metadata": {}, "conversation_id": "conv-json-ignored"},
+            json={"message": "Hi", "stream": False, "metadata": {}, "conversation_id": "conv-json-ignored"},
         )
         assert response.status_code == 200
     assert stub.chat_payload.context.conversation_id == "conv-header-wins"
@@ -324,7 +325,7 @@ def test_chat_rejects_short_x_conversation_id():
         response = client.post(
             "/v1/chat",
             headers={**_auth_headers(), "X-Conversation-Id": "ab"},
-            json={"message": "Hi", "metadata": {}},
+            json={"message": "Hi", "stream": False, "metadata": {}},
         )
         assert response.status_code == 400
 
@@ -337,7 +338,7 @@ def test_chat_rejects_short_x_session_id():
         response = client.post(
             "/v1/chat",
             headers={**_auth_headers(), "X-Session-Id": "ab"},
-            json={"message": "Hi", "metadata": {}},
+            json={"message": "Hi", "stream": False, "metadata": {}},
         )
         assert response.status_code == 400
 
@@ -380,7 +381,7 @@ class EnrichedDoneStreamStub:
             }
         )
         yield 'event: meta\ndata: {"request_id":"req_x","trace_id":"trace_x","session_id":"sess_x"}\n\n'
-        yield 'event: token\ndata: {"text":"H4 EAD."}\n\n'
+        yield 'event: answer_delta\ndata: {"text":"H4 EAD."}\n\n'
         yield f"event: done\ndata: {done}\n\n"
 
 
@@ -404,6 +405,23 @@ def test_chat_stream_preserves_citations_and_follow_ups_on_done():
         assert payload["follow_up_questions"] == ["What does H4 EAD mean?"]
 
 
+def test_chat_defaults_to_stream_when_stream_omitted():
+    """Omitted ``stream`` uses SSE (default true)."""
+    app = create_app()
+    with TestClient(app) as client:
+        app.state.orchestrator_client = StubOrchestratorClient()
+        response = client.post(
+            "/v1/chat",
+            headers=_auth_headers(),
+            json={"message": "stream by default", "metadata": {}},
+        )
+        assert response.status_code == 200
+        body = response.text
+        assert "event: meta" in body
+        assert "event: answer_delta" in body
+        assert "event: done" in body
+
+
 def test_chat_streaming_contract():
     """Chat streaming contract."""
     app = create_app()
@@ -417,7 +435,7 @@ def test_chat_streaming_contract():
         assert response.status_code == 200
         body = response.text
         assert "event: meta" in body
-        assert "event: token" in body
+        assert "event: answer_delta" in body
         assert "event: done" in body
         meta_line = [ln for ln in body.splitlines() if ln.startswith("data:") and "request_id" in ln][0]
         meta = json.loads(meta_line.split("data:", 1)[1].strip())
@@ -437,7 +455,7 @@ def test_chat_streaming_via_json_body_stream_flag():
         assert response.status_code == 200
         body = response.text
         assert "event: meta" in body
-        assert "event: token" in body
+        assert "event: answer_delta" in body
         assert "event: done" in body
 
 
@@ -448,12 +466,12 @@ class StubOrchestratorContextErrorInStream:
 
     async def stream_chat(self, *args, **kwargs):
         """Stream chat."""
-        yield 'event: token\ndata: {"text":"partial answer"}\n\n'
+        yield 'event: answer_delta\ndata: {"text":"partial answer"}\n\n'
         bad = (
             "Error: ValueError: <Token var=<ContextVar name='pipeline_phase' at 0x0> "
             "at 0x0> was created in a different Context"
         )
-        yield f"event: token\ndata: {json.dumps({'text': bad})}\n\n"
+        yield f"event: answer_delta\ndata: {json.dumps({'text': bad})}\n\n"
 
 
 def test_chat_stream_rewrites_contextvar_poison_token_to_sse_error():
