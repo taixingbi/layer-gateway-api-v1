@@ -26,6 +26,7 @@ from app.services.chat_history_service import (
     _model_from_usage,
     resolve_assistant_model_name,
 )
+from app.services.chat_events_service import insert_guest_chat_event
 from app.schemas.history import ChatHistoryMessage
 from app.schemas.chat_response import ChatResponse, ErrorDetails
 from app.schemas.orchestrator import (
@@ -491,6 +492,13 @@ async def chat(request: Request, payload: ChatRequest):
             usage=normalize_orchestrator_usage(result),
             latency_ms=latency.build(request, orchestrator_workflow=orch_workflow),
         )
+        insert_guest_chat_event(
+            request,
+            prompt=payload.message,
+            answer=result.answer,
+            route=getattr(result, "route", None),
+            latency_ms=body.latency_ms,
+        )
         json_resp = JSONResponse(content=body.model_dump(mode="json", exclude_none=True))
         sid = getattr(request.state, "session_cookie_to_set", None)
         if sid:
@@ -646,6 +654,13 @@ async def _stream_response(request: Request, orchestrator_payload: OrchestratorC
             stream_usage_out = normalize_orchestrator_usage(done_body) or stream_usage
             if stream_usage_out:
                 done_body["usage"] = stream_usage_out
+            insert_guest_chat_event(
+                request,
+                prompt=orchestrator_payload.input.question,
+                answer="".join(assistant_parts),
+                route=done_body.get("route") if isinstance(done_body.get("route"), str) else None,
+                latency_ms=done_body.get("latency_ms") if isinstance(done_body.get("latency_ms"), dict) else None,
+            )
             yield _format_done_sse_chunk(done_body)
     except HTTPException as exc:
         # Convert mapped HTTP failures to stream-safe error envelope.

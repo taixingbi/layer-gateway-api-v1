@@ -15,6 +15,7 @@ from app.middleware.chat_limits import ChatLimitsMiddleware
 from app.middleware.inflight import InflightLimitMiddleware
 from app.middleware.request_context import RequestContextMiddleware
 from app.routes.auth import router as auth_router
+from app.routes.admin_guest_history import router as admin_guest_history_router
 from app.routes.chat import router as chat_router
 from app.routes.conversations import router as conversations_router
 from app.routes.feedback import router as feedback_router
@@ -119,6 +120,7 @@ def create_app() -> FastAPI:
 
     app.include_router(auth_router)
     app.include_router(profile_router)
+    app.include_router(admin_guest_history_router)
     app.include_router(chat_router)
     app.include_router(conversations_router)
     app.include_router(feedback_router)
