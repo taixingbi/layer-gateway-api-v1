@@ -20,9 +20,14 @@ MAX_LIST_LIMIT = 500
 
 
 def _client_ip(request: Request) -> str | None:
-    forwarded = (request.headers.get("x-forwarded-for") or "").split(",")[0].strip()
-    if forwarded:
-        return forwarded
+    for header in ("cf-connecting-ip", "true-client-ip", "x-forwarded-for", "x-real-ip"):
+        raw = (request.headers.get(header) or "").strip()
+        if not raw:
+            continue
+        if header == "x-forwarded-for":
+            raw = raw.split(",")[0].strip()
+        if raw:
+            return raw
     if request.client and request.client.host:
         return request.client.host
     return None
