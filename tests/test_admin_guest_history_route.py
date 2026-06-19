@@ -40,7 +40,7 @@ def test_admin_guest_history_ok(mock_list, mock_configured, mock_verify):
             "prompt_chars": 5,
             "route": "rag",
             "answer_preview": "hi",
-            "latency_ms": {"total_ms": 42},
+            "latency_ms": {"total": 42, "auth": 1},
             "client_ip": "10.0.0.1",
             "user_agent": "pytest",
         }
